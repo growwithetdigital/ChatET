@@ -3,23 +3,17 @@ import {
   Menu,
   Send,
   Square,
-  Sparkles,
-  Download,
   ChevronRight,
-  RefreshCw,
+  Plus,
   Paperclip,
-  Image as ImageIcon,
-  Wand2,
   FileUp,
-  Brain,
-  Zap,
-  Settings2,
-  FileText,
   Mic,
   Radio,
   Globe,
-  Cloud,
-  LogIn,
+  Sun,
+  Moon,
+  BookOpen,
+  Settings2,
 } from 'lucide-react';
 import {
   Message,
@@ -30,19 +24,19 @@ import {
   MemoryItem,
   GroundingSource,
 } from './types';
-import { FOCUS_AREAS, TAILORED_PROMPTS } from './data/constants';
+import { TAILORED_PROMPTS } from './data/constants';
 import { EtDigitalLogo } from './components/EtDigitalLogo';
 import { EricHaloAvatar } from './components/EricHaloAvatar';
-import { SevenRulesBar } from './components/SevenRulesBar';
-import { FocusLensSelector } from './components/FocusLensSelector';
 import { ChatMessage } from './components/ChatMessage';
-import { SidebarThreads } from './components/SidebarThreads';
+import { SidebarThreads, WorkspaceTab } from './components/SidebarThreads';
 import { FileAttachmentBar } from './components/FileAttachmentBar';
 import { ImageStudioModal } from './components/ImageStudioModal';
 import { CustomEtModal } from './components/CustomEtModal';
 import { CustomEtSelector } from './components/CustomEtSelector';
 import { MemoryBankModal } from './components/MemoryBankModal';
 import { VoiceAdvisorModal } from './components/VoiceAdvisorModal';
+import { PromptLibraryView } from './components/PromptLibraryView';
+import { CustomEtsView } from './components/CustomEtsView';
 import {
   getCustomETs,
   saveCustomETs,
@@ -70,8 +64,38 @@ import {
 } from './utils/firestoreSync';
 
 const STORAGE_KEY = 'eric_ai_threads_v1';
+const THEME_STORAGE_KEY = 'chat_et_theme_v1';
 
 export default function App() {
+  // Light / Dark Theme state
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    try {
+      const saved = localStorage.getItem(THEME_STORAGE_KEY);
+      if (saved === 'light' || saved === 'dark') return saved;
+    } catch {
+      // ignore
+    }
+    return 'dark';
+  });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.remove('dark', 'light');
+    root.classList.add(theme);
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, theme);
+    } catch {
+      // ignore
+    }
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  };
+
+  // Active Workspace Tab ('chat' | 'prompts' | 'custom_ets')
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>('chat');
+
   const [threads, setThreads] = useState<Thread[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -87,7 +111,7 @@ export default function App() {
     return [
       {
         id: 'thread-default',
-        title: 'Executive Advisory Session',
+        title: 'New ChatET Session',
         createdAt: Date.now(),
         updatedAt: Date.now(),
         focusArea: 'all',
@@ -129,6 +153,7 @@ export default function App() {
   const [noticeBanner, setNoticeBanner] = useState<string | null>(null);
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Thinking lens lives behind the scenes automatically
   const [activeLens, setActiveLens] = useState<FocusAreaId>('all');
   const [imageStudioOpen, setImageStudioOpen] = useState(false);
   const [imageStudioPrompt, setImageStudioPrompt] = useState('');
@@ -156,7 +181,6 @@ export default function App() {
     const unsubscribeVault = subscribeToUserVault(currentUser.uid, {
       onThreadsAndMessages: (threadsMeta, messagesByThread) => {
         if (threadsMeta.length === 0) {
-          // Seed initial local threads to Firestore once if cloud is empty
           if (!seededCloudRef.current) {
             seededCloudRef.current = true;
             threads.forEach((t) => {
@@ -192,7 +216,6 @@ export default function App() {
       },
       onCustomEts: (cloudEts) => {
         if (cloudEts.length > 0) {
-          // Merge built-in ETs if any are missing
           const cloudIds = new Set(cloudEts.map((e) => e.id));
           const missingBuiltIns = DEFAULT_CUSTOM_ETS.filter((d) => !cloudIds.has(d.id));
           setCustomEts([...cloudEts, ...missingBuiltIns]);
@@ -246,8 +269,10 @@ export default function App() {
   };
 
   useEffect(() => {
-    scrollToBottom();
-  }, [activeThread?.messages, isStreaming]);
+    if (activeTab === 'chat') {
+      scrollToBottom();
+    }
+  }, [activeThread?.messages, isStreaming, activeTab]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -280,34 +305,32 @@ export default function App() {
 
     const newThread: Thread = {
       id: `thread-${Date.now()}`,
-      title: targetEt ? `${targetEt.name} Consultation` : 'New Advisory Inquiry',
+      title: targetEt ? `${targetEt.name} Session` : 'New ChatET Session',
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      focusArea: targetEt?.focusArea || activeLens,
+      focusArea: targetEt?.focusArea || 'all',
       customEtId: targetEtId || undefined,
       messages: [],
     };
     setThreads((prev) => [newThread, ...prev]);
     setActiveThreadId(newThread.id);
-    if (targetEt?.focusArea) {
-      setActiveLens(targetEt.focusArea);
-    }
+    setActiveLens(targetEt?.focusArea || 'all');
+    setActiveTab('chat');
     saveThreadToFirestore(newThread);
   };
 
   const handleSelectEt = (etId: string | null) => {
     setActiveEtId(etId);
     const selectedEt = customEts.find((et) => et.id === etId);
-    if (selectedEt?.focusArea) {
-      setActiveLens(selectedEt.focusArea);
-    }
+    // Automatically set the behind-the-scenes lens from the Custom ET or default to 'all'
+    setActiveLens(selectedEt?.focusArea || 'all');
 
     if (activeThread.messages.length === 0) {
       const updatedThread: Thread = {
         ...activeThread,
         customEtId: etId || undefined,
-        title: selectedEt ? `${selectedEt.name} Consultation` : 'New Advisory Inquiry',
-        focusArea: selectedEt?.focusArea || activeThread.focusArea,
+        title: selectedEt ? `${selectedEt.name} Session` : 'New ChatET Session',
+        focusArea: selectedEt?.focusArea || 'all',
       };
       setThreads((prev) =>
         prev.map((t) => (t.id === activeThread.id ? updatedThread : t))
@@ -379,7 +402,7 @@ export default function App() {
       if (remaining.length === 0) {
         const fresh: Thread = {
           id: `thread-${Date.now()}`,
-          title: 'Fresh Strategic Session',
+          title: 'New ChatET Session',
           createdAt: Date.now(),
           updatedAt: Date.now(),
           focusArea: 'all',
@@ -435,7 +458,6 @@ export default function App() {
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognitionAPI) {
-      // Open full Voice Modal which supports MediaRecorder + Gemini Transcription fallback
       setIsVoiceModalOpen(true);
       return;
     }
@@ -533,12 +555,17 @@ export default function App() {
     customPrompt?: string,
     customAttachments?: FileAttachment[],
     isVoiceMode = false,
-    onCompleteCallback?: (finalText: string) => void
+    onCompleteCallback?: (finalText: string) => void,
+    overrideEtId?: string | null
   ) => {
     const promptToSend = (customPrompt !== undefined ? customPrompt : input).trim();
     const attachmentsToSend = customAttachments !== undefined ? customAttachments : attachments;
 
     if ((!promptToSend && attachmentsToSend.length === 0) || isStreaming) return;
+
+    const effectiveEtId = overrideEtId !== undefined ? overrideEtId : activeEtId;
+    const effectiveCustomEt = customEts.find((et) => et.id === effectiveEtId);
+    const effectiveLens = effectiveCustomEt?.focusArea || activeLens || 'all';
 
     if (customPrompt === undefined) {
       setInput('');
@@ -558,7 +585,7 @@ export default function App() {
         promptToSend ||
         `[Analyzed ${attachmentsToSend.length} attached document${attachmentsToSend.length > 1 ? 's' : ''}]`,
       timestamp: nowTs,
-      focusArea: activeLens,
+      focusArea: effectiveLens,
       attachments: attachmentsToSend.length > 0 ? [...attachmentsToSend] : undefined,
     };
 
@@ -568,14 +595,16 @@ export default function App() {
       activeThread.title === 'New Advisory Inquiry' ||
       activeThread.title === 'Fresh Strategic Session' ||
       activeThread.title === 'Executive Advisory Session' ||
-      activeThread.title.endsWith('Consultation')
+      activeThread.title === 'New ChatET Session' ||
+      activeThread.title.endsWith('Consultation') ||
+      activeThread.title.endsWith('Session')
     ) {
       const summaryTitle =
         promptToSend ||
-        (attachmentsToSend[0]?.name ? `Audit: ${attachmentsToSend[0].name}` : 'Strategic Session');
-      if (activeCustomEt) {
+        (attachmentsToSend[0]?.name ? `Audit: ${attachmentsToSend[0].name}` : 'ChatET Session');
+      if (effectiveCustomEt) {
         updatedTitle =
-          `${activeCustomEt.name}: ${summaryTitle.slice(0, 30)}` +
+          `${effectiveCustomEt.name}: ${summaryTitle.slice(0, 30)}` +
           (summaryTitle.length > 30 ? '...' : '');
       } else {
         updatedTitle = summaryTitle.slice(0, 42) + (summaryTitle.length > 42 ? '...' : '');
@@ -588,7 +617,7 @@ export default function App() {
       role: 'model',
       content: '',
       timestamp: nowTs + 1,
-      focusArea: activeLens,
+      focusArea: effectiveLens,
       isStreaming: true,
     };
 
@@ -596,7 +625,8 @@ export default function App() {
     const updatedThreadMeta: Thread = {
       ...activeThread,
       title: updatedTitle,
-      customEtId: activeEtId || undefined,
+      customEtId: effectiveEtId || undefined,
+      focusArea: effectiveLens,
       updatedAt: nowTs,
       messages: [...activeThread.messages, userMessage, placeholderModelMessage],
     };
@@ -605,7 +635,6 @@ export default function App() {
       prev.map((t) => (t.id === targetThreadId ? updatedThreadMeta : t))
     );
 
-    // Persist thread and user message to Firestore (ensuring thread exists first)
     saveThreadToFirestore(updatedThreadMeta).then(() => {
       saveMessageToFirestore(targetThreadId, userMessage);
     });
@@ -630,16 +659,16 @@ export default function App() {
         body: JSON.stringify({
           messages: messagesHistory,
           currentPrompt: promptToSend,
-          focusArea: activeLens,
+          focusArea: effectiveLens,
           attachments: attachmentsToSend,
           useWebSearch,
           isVoiceMode,
-          customEt: activeCustomEt
+          customEt: effectiveCustomEt
             ? {
-                name: activeCustomEt.name,
-                tagline: activeCustomEt.tagline,
-                instructions: activeCustomEt.instructions,
-                files: activeCustomEt.files,
+                name: effectiveCustomEt.name,
+                tagline: effectiveCustomEt.tagline,
+                instructions: effectiveCustomEt.instructions,
+                files: effectiveCustomEt.files,
               }
             : undefined,
           memoryItems: memoryItems.map((m) => ({
@@ -734,12 +763,12 @@ export default function App() {
       onCompleteCallback?.(accumulatedText);
     } catch (err: any) {
       if (err.name === 'AbortError') {
-        console.log('Stream aborted by Eric');
+        console.log('Stream aborted');
       } else {
         console.error('Error fetching stream', err);
         const fallbackMsgContent =
           accumulatedText ||
-          `Connection note: Unable to retrieve counsel. ${err?.message || 'Please check your connection or attached API credentials.'}`;
+          `Connection note: Unable to retrieve response. ${err?.message || 'Please check your connection or attached API credentials.'}`;
 
         const errorModelMsg: Message = {
           ...placeholderModelMessage,
@@ -776,32 +805,35 @@ export default function App() {
   };
 
   const handleExportTranscript = () => {
+    if (activeThread.messages.length === 0) return;
     const transcript = activeThread.messages
       .map((m) => {
-        const roleName = m.role === 'user' ? 'ERIC THOMAS' : 'ERIC AI (ADVISOR)';
+        const roleName = m.role === 'user' ? 'ERIC THOMAS' : 'CHATET';
         const dateStr = new Date(m.timestamp).toLocaleString();
         return `### ${roleName} [${dateStr}]\n\n${m.content}\n\n---\n`;
       })
       .join('\n');
 
-    const header = `# Strategic Advisory Transcript: ${activeThread.title}\nDate: ${new Date().toLocaleDateString()}\nFocus Lens: ${activeThread.focusArea}\n\n---\n\n`;
+    const header = `# ChatET Transcript: ${activeThread.title}\nDate: ${new Date().toLocaleDateString()}\n\n---\n\n`;
     const fullText = header + transcript;
 
     const blob = new Blob([fullText], { type: 'text/markdown;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `eric-ai-${activeThread.title.toLowerCase().replace(/[^a-z0-9]/g, '-')}.md`;
+    link.download = `chatet-${activeThread.title.toLowerCase().replace(/[^a-z0-9]/g, '-')}.md`;
     link.click();
     URL.revokeObjectURL(url);
   };
 
   return (
     <div className="flex h-screen w-full bg-[#080d14] text-slate-100 overflow-hidden font-sans">
-      {/* Sidebar Threads Drawer */}
+      {/* Sidebar Drawer / Menu */}
       <SidebarThreads
         threads={threads}
         activeThreadId={activeThreadId}
+        activeTab={activeTab}
+        onSelectTab={setActiveTab}
         onSelectThread={(id) => {
           setActiveThreadId(id);
           const selected = threads.find((t) => t.id === id);
@@ -822,51 +854,48 @@ export default function App() {
           setIsCustomEtModalOpen(true);
         }}
         onOpenMemoryBank={() => setIsMemoryBankModalOpen(true)}
+        onOpenVisualStudio={() => {
+          setImageStudioPrompt('');
+          setImageStudioOpen(true);
+        }}
+        onOpenVoiceMode={() => setIsVoiceModalOpen(true)}
+        onExportTranscript={handleExportTranscript}
         memoryCount={memoryItems.length}
+        theme={theme}
+        onToggleTheme={toggleTheme}
         currentUser={currentUser}
         onSignIn={handleSignIn}
         onSignOut={handleSignOut}
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 lg:pl-72 sm:lg:pl-80 relative h-full">
-        {/* Top Navbar */}
-        <header className="h-16 px-4 sm:px-6 border-b border-slate-800/90 bg-[#090e17]/80 backdrop-blur-md flex items-center justify-between z-20 flex-shrink-0">
+      <div className="flex-1 flex flex-col min-w-0 lg:pl-72 relative h-full">
+        {/* Clean 3-Zone Top Navigation Bar */}
+        <header className="h-14 px-4 sm:px-6 border-b border-slate-800/80 bg-[#090e17]/90 backdrop-blur-md flex items-center justify-between z-20 flex-shrink-0">
+          {/* Zone 1: Menu Trigger + Brand Mark + Active ET Selector */}
           <div className="flex items-center gap-3">
             <button
               onClick={() => setSidebarOpen(true)}
               className="lg:hidden p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
-              title="Open threads"
+              title="Open menu"
             >
               <Menu className="w-5 h-5" />
             </button>
 
-            <div className="flex items-center gap-3">
-              <EtDigitalLogo size="sm" showSubtitle={false} className="cursor-pointer" />
-              <div className="h-5 w-[1px] bg-slate-800 hidden sm:block" />
-              <div className="hidden sm:flex flex-col">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-sm font-extrabold font-heading tracking-wide text-white">
-                    ERIC <span className="text-cyan-400">AI</span>
-                  </span>
-                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-800/60">
-                    Thinking Partner
-                  </span>
-                </div>
-                <span className="text-[10px] text-slate-400 truncate max-w-[200px] md:max-w-xs">
-                  {activeThread.title}
-                </span>
-              </div>
-            </div>
-          </div>
+            <button
+              onClick={() => setActiveTab('chat')}
+              className="font-heading font-extrabold text-base tracking-tight text-white hidden sm:inline-block"
+            >
+              Chat<span className="text-cyan-400">ET</span>
+            </button>
 
-          {/* Right Action Controls */}
-          <div className="flex items-center gap-2">
-            {/* Custom ET Selector dropdown in top bar */}
             <CustomEtSelector
               customEts={customEts}
               activeEtId={activeEtId}
-              onSelectEt={handleSelectEt}
+              onSelectEt={(id) => {
+                handleSelectEt(id);
+                setActiveTab('chat');
+              }}
               onCreateNew={() => {
                 setEditingCustomEt(null);
                 setIsCustomEtModalOpen(true);
@@ -876,85 +905,105 @@ export default function App() {
                 setIsCustomEtModalOpen(true);
               }}
             />
+          </div>
 
-            {/* Live Voice Conversation Button */}
+          {/* Zone 2: Clean Workspace Navigation Tabs */}
+          <nav className="hidden md:flex items-center gap-1 p-1 rounded-xl bg-slate-900/90 border border-slate-800/80">
             <button
-              onClick={() => setIsVoiceModalOpen(true)}
-              className="px-2.5 py-1.5 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 text-xs font-semibold text-cyan-300 border border-cyan-700/60 transition-all flex items-center gap-1.5 shadow-[0_0_12px_rgba(6,182,212,0.18)]"
-              title="Open Live Voice Conversation with Eric AI"
+              onClick={() => setActiveTab('chat')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
+                activeTab === 'chat'
+                  ? 'bg-cyan-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
             >
-              <Radio className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-              <span className="hidden md:inline">Voice Mode</span>
+              Chat
             </button>
-
-            {/* Persistent Memory Bank button */}
             <button
-              onClick={() => setIsMemoryBankModalOpen(true)}
-              className="px-2.5 py-1.5 rounded-lg bg-slate-850 hover:bg-slate-800 text-xs font-semibold text-slate-300 border border-slate-700 hover:border-cyan-500/40 transition-all flex items-center gap-1.5"
-              title="Manage Eric's Persistent Memory Bank"
+              onClick={() => setActiveTab('prompts')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
+                activeTab === 'prompts'
+                  ? 'bg-cyan-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
             >
-              <Brain className="w-3.5 h-3.5 text-cyan-400" />
-              <span className="hidden sm:inline">Memory</span>
-              <span className="px-1.5 py-0.2 rounded-full bg-cyan-950 text-cyan-300 text-[10px] font-mono border border-cyan-800/60">
-                {memoryItems.length}
-              </span>
+              Prompt Library
             </button>
-
+            <button
+              onClick={() => setActiveTab('custom_ets')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
+                activeTab === 'custom_ets'
+                  ? 'bg-cyan-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Custom ETs
+            </button>
             <button
               onClick={() => {
                 setImageStudioPrompt('');
                 setImageStudioOpen(true);
               }}
-              className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-xs font-semibold text-cyan-300 border border-slate-700 transition-all flex items-center gap-1.5"
-              title="Open Visual Studio to generate mockups and images"
+              className="px-3.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap text-slate-400 hover:text-white transition-colors"
             >
-              <Wand2 className="w-3.5 h-3.5 text-cyan-400" />
-              <span className="hidden lg:inline">Visual Studio</span>
+              Visual Studio
+            </button>
+            <button
+              onClick={() => setIsMemoryBankModalOpen(true)}
+              className="px-3.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap text-slate-400 hover:text-white transition-colors"
+            >
+              Memory ({memoryItems.length})
+            </button>
+          </nav>
+
+          {/* Zone 3: Essential Right Actions (Voice Mode, Theme Toggle, New Chat) */}
+          <div className="flex items-center gap-2">
+            {/* Mobile Prompt Library Tab Trigger */}
+            <button
+              onClick={() => setActiveTab(activeTab === 'prompts' ? 'chat' : 'prompts')}
+              className={`md:hidden p-2 rounded-lg border text-xs transition-colors ${
+                activeTab === 'prompts'
+                  ? 'bg-cyan-950 text-cyan-300 border-cyan-500/50'
+                  : 'text-slate-400 border-slate-800 hover:text-white'
+              }`}
+              title="Prompt Library"
+            >
+              <BookOpen className="w-4 h-4" />
             </button>
 
             <button
-              onClick={handleExportTranscript}
-              disabled={activeThread.messages.length === 0}
-              className="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-xs flex items-center gap-1.5"
-              title="Export session transcript (Markdown)"
+              onClick={() => setIsVoiceModalOpen(true)}
+              className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-xs font-medium text-cyan-300 border border-slate-800 transition-colors flex items-center gap-1.5 whitespace-nowrap"
+              title="Live Voice Mode"
             >
-              <Download className="w-4 h-4" />
+              <Radio className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="hidden sm:inline">Voice</span>
+            </button>
+
+            <button
+              onClick={toggleTheme}
+              className="p-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 transition-colors"
+              title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            >
+              {theme === 'dark' ? (
+                <Sun className="w-4 h-4 text-amber-400" />
+              ) : (
+                <Moon className="w-4 h-4 text-slate-600" />
+              )}
             </button>
 
             <button
               onClick={() => handleNewThread(activeEtId)}
-              className="px-2.5 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 text-xs font-semibold text-cyan-300 border border-slate-700 transition-all flex items-center gap-1.5"
-              title="New consultation"
+              className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 text-xs font-semibold text-white transition-all flex items-center gap-1 whitespace-nowrap"
+              title="Start new conversation"
             >
-              <RefreshCw className="w-3.5 h-3.5 text-cyan-400" />
-              <span className="hidden xl:inline">New Session</span>
+              <Plus className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">New Chat</span>
             </button>
-
-            {/* Cloud Vault Status / Sign-In */}
-            {currentUser ? (
-              <div
-                className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-950/60 border border-emerald-800/60 text-[10px] font-mono text-emerald-300"
-                title={`Synced to Cloud Firestore as ${currentUser.email}`}
-              >
-                <Cloud className="w-3 h-3 text-emerald-400" />
-                <span>Synced</span>
-              </div>
-            ) : (
-              <button
-                onClick={handleSignIn}
-                className="hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-medium text-slate-300 hover:text-cyan-300 transition-colors"
-                title="Sign in with Google for Cloud Firestore sync"
-              >
-                <LogIn className="w-3.5 h-3.5 text-cyan-400" />
-                <span className="hidden xl:inline">Sync</span>
-              </button>
-            )}
-
-            <EricHaloAvatar size="sm" />
           </div>
         </header>
 
-        {/* Notice Banner */}
+        {/* Notice Banner (Only when active) */}
         {noticeBanner && (
           <div className="mx-4 sm:mx-6 mt-2 px-3 py-2 rounded-xl bg-amber-950/80 border border-amber-700/60 text-xs text-amber-200 flex items-center justify-between">
             <span>{noticeBanner}</span>
@@ -967,348 +1016,304 @@ export default function App() {
           </div>
         )}
 
-        {/* Focus Lens & Rule Guardrails Bar */}
-        <div className="px-4 sm:px-6 pt-3 pb-1 border-b border-slate-800/50 bg-slate-950/40 flex-shrink-0 space-y-2">
-          <FocusLensSelector
-            selectedLens={activeLens}
-            onSelectLens={(lens) => {
-              setActiveLens(lens);
-              setThreads((prev) =>
-                prev.map((t) => {
-                  if (t.id === activeThread.id) {
-                    const updated = { ...t, focusArea: lens };
-                    saveThreadToFirestore(updated);
-                    return updated;
-                  }
-                  return t;
-                })
-              );
+        {/* Active Tab Views */}
+        {activeTab === 'prompts' ? (
+          <PromptLibraryView
+            onRunPrompt={(promptText, recommendedEtId, enableWebSearch) => {
+              if (recommendedEtId !== undefined) {
+                handleSelectEt(recommendedEtId);
+              }
+              if (enableWebSearch) {
+                setUseWebSearch(true);
+              }
+              setActiveTab('chat');
+              setTimeout(() => {
+                handleSendMessage(
+                  promptText,
+                  [],
+                  false,
+                  undefined,
+                  recommendedEtId !== undefined ? recommendedEtId : activeEtId
+                );
+              }, 20);
+            }}
+            onLoadPromptIntoInput={(promptText, recommendedEtId) => {
+              if (recommendedEtId !== undefined) {
+                handleSelectEt(recommendedEtId);
+              }
+              setInput(promptText);
+              setActiveTab('chat');
+              setTimeout(() => {
+                textareaRef.current?.focus();
+              }, 50);
             }}
           />
-          <SevenRulesBar />
-        </div>
-
-        {/* Active Custom ET Context Banner */}
-        {activeCustomEt && (
-          <div className="mx-4 sm:mx-6 mt-3 px-3.5 py-2.5 rounded-xl bg-cyan-950/40 border border-cyan-500/40 flex items-center justify-between gap-3 text-xs animate-in fade-in duration-150">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="p-1.5 rounded-lg bg-cyan-900/60 text-cyan-300 border border-cyan-700/50">
-                <Zap className="w-3.5 h-3.5 text-cyan-300" />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-cyan-200 truncate">{activeCustomEt.name}</span>
-                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-cyan-900/50 text-cyan-300 border border-cyan-700/60">
-                    Active Custom ET
-                  </span>
-                  {activeCustomEt.files.length > 0 && (
-                    <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                      <FileText className="w-3 h-3 text-cyan-400" />
-                      {activeCustomEt.files.length} knowledge file
-                      {activeCustomEt.files.length > 1 ? 's' : ''}
-                    </span>
-                  )}
-                </div>
-                <p className="text-[11px] text-slate-400 truncate">{activeCustomEt.tagline}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <button
-                onClick={() => {
-                  setEditingCustomEt(activeCustomEt);
-                  setIsCustomEtModalOpen(true);
-                }}
-                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-medium flex items-center gap-1 border border-slate-700"
-              >
-                <Settings2 className="w-3 h-3 text-slate-400" />
-                <span>Configure</span>
-              </button>
-              <button
-                onClick={() => handleSelectEt(null)}
-                className="text-[11px] text-slate-400 hover:text-cyan-300 transition-colors"
-              >
-                Clear
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Message Stream Scroll Area with Drag-and-Drop */}
-        <div
-          className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4 relative"
-          onDragOver={(e) => {
-            e.preventDefault();
-            setIsDraggingOver(true);
-          }}
-          onDragLeave={(e) => {
-            e.preventDefault();
-            setIsDraggingOver(false);
-          }}
-          onDrop={async (e) => {
-            e.preventDefault();
-            setIsDraggingOver(false);
-            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-              await processFileList(e.dataTransfer.files);
-            }
-          }}
-        >
-          {isDraggingOver && (
-            <div className="absolute inset-4 z-30 flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-cyan-400 bg-slate-950/95 backdrop-blur-md pointer-events-none animate-in fade-in duration-150">
-              <FileUp className="w-14 h-14 text-cyan-400 mb-3 animate-bounce" />
-              <div className="text-lg font-bold text-slate-100">Drop Documents or Images for Eric AI</div>
-              <p className="text-xs text-slate-400 mt-1 max-w-sm text-center">
-                Instantly attach PDFs, contracts, pitch decks, spreadsheets, marketing reports, or visual mockups.
-              </p>
-            </div>
-          )}
-
-          {activeThread.messages.length === 0 ? (
-            /* Empty State: Executive Dossier & Prompt Starters */
-            <div className="max-w-3xl mx-auto py-6 sm:py-10 flex flex-col items-center text-center">
-              <div className="mb-6 relative">
-                <EricHaloAvatar size="lg" />
-              </div>
-
-              <div className="flex items-center gap-2 mb-2">
-                <EtDigitalLogo size="sm" />
-              </div>
-
-              <h1 className="text-2xl sm:text-3xl font-extrabold font-heading text-white tracking-tight mb-2">
-                Private Advisory for <span className="text-cyan-400">Eric Thomas</span>
-              </h1>
-
-              <p className="text-sm text-slate-400 max-w-xl leading-relaxed mb-6">
-                Your direct, unsweetened thinking partner. Synthesizing 20+ years of growth marketing, entrepreneurship, teenage parenting, and first-principles skepticism with Live Google Search Grounding, Voice Counsel, and Cloud Memory.
-              </p>
-
-              {/* 4 Thinking Habits Badges */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 w-full max-w-2xl mb-8">
-                <div className="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 text-left">
-                  <span className="text-[10px] font-mono text-cyan-400 block font-bold">LENS 01</span>
-                  <span className="text-xs font-semibold text-slate-200">Growth Strategist</span>
-                  <span className="text-[11px] text-slate-400 block mt-0.5">Systems, funnels, metrics</span>
-                </div>
-                <div className="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 text-left">
-                  <span className="text-[10px] font-mono text-cyan-400 block font-bold">LENS 02</span>
-                  <span className="text-xs font-semibold text-slate-200">Scientific Skeptic</span>
-                  <span className="text-[11px] text-slate-400 block mt-0.5">Flag speculation, demand proof</span>
-                </div>
-                <div className="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 text-left">
-                  <span className="text-[10px] font-mono text-cyan-400 block font-bold">LENS 03</span>
-                  <span className="text-xs font-semibold text-slate-200">First Principles</span>
-                  <span className="text-[11px] text-slate-400 block mt-0.5">Fundamentals over consensus</span>
-                </div>
-                <div className="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 text-left">
-                  <span className="text-[10px] font-mono text-cyan-400 block font-bold">LENS 04</span>
-                  <span className="text-xs font-semibold text-slate-200">Historian&apos;s Patience</span>
-                  <span className="text-[11px] text-slate-400 block mt-0.5">Context before prescription</span>
-                </div>
-              </div>
-
-              {/* Tailored Sounding Board Prompt Starters */}
-              <div className="w-full text-left max-w-2xl">
-                <div className="flex items-center gap-2 mb-3">
-                  <Sparkles className="w-4 h-4 text-cyan-400" />
-                  <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-300">
-                    {activeCustomEt ? `${activeCustomEt.name} Prompts` : 'Sounding Board Starters'}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {(activeCustomEt?.starterPrompts && activeCustomEt.starterPrompts.length > 0
-                    ? activeCustomEt.starterPrompts.map((p, i) => ({
-                        title: `Inquiry 0${i + 1}`,
-                        prompt: p,
-                      }))
-                    : TAILORED_PROMPTS
-                  ).map((item, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => handleSendMessage(item.prompt)}
-                      className="group p-3 rounded-xl bg-slate-900/80 hover:bg-slate-850 border border-slate-800 hover:border-cyan-500/40 text-left transition-all hover:shadow-[0_0_15px_rgba(6,182,212,0.15)] flex flex-col justify-between"
-                    >
-                      <div>
-                        <div className="text-[10px] font-mono uppercase text-cyan-400/90 font-semibold mb-1">
-                          {item.title}
-                        </div>
-                        <p className="text-xs text-slate-300 line-clamp-2 leading-snug">
-                          {item.prompt}
-                        </p>
-                      </div>
-                      <div className="flex items-center justify-end mt-2 text-[11px] text-slate-500 group-hover:text-cyan-300 transition-colors">
-                        <span>Consult</span>
-                        <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          ) : (
-            /* Active Message List */
-            <div className="max-w-3xl mx-auto space-y-4">
-              {activeThread.messages.map((msg) => (
-                <ChatMessage
-                  key={msg.id}
-                  message={msg}
-                  onClarify={(clarifyText) => handleSendMessage(clarifyText)}
-                  onOpenImageStudioWithPrompt={(p) => {
-                    setImageStudioPrompt(p);
-                    setImageStudioOpen(true);
-                  }}
-                  onMemoryDetected={handleMemoryDetected}
-                />
-              ))}
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-        </div>
-
-        {/* Input Bar Area */}
-        <div className="p-4 sm:p-6 border-t border-slate-800/90 bg-[#090e17]/90 backdrop-blur-md flex-shrink-0">
-          <div className="max-w-3xl mx-auto">
-            <FileAttachmentBar
-              attachments={attachments}
-              onAddAttachments={(newAtts) => setAttachments((prev) => [...prev, ...newAtts])}
-              onRemoveAttachment={(id) =>
-                setAttachments((prev) => prev.filter((a) => a.id !== id))
+        ) : activeTab === 'custom_ets' ? (
+          <CustomEtsView
+            customEts={customEts}
+            activeEtId={activeEtId}
+            onSelectEtAndChat={(etId, starterPrompt) => {
+              handleSelectEt(etId);
+              setActiveTab('chat');
+              if (starterPrompt) {
+                setTimeout(() => {
+                  handleSendMessage(starterPrompt, [], false, undefined, etId);
+                }, 20);
               }
-              onTriggerRef={(trigger) => {
-                fileTriggerRef.current = trigger;
+            }}
+            onCreateNew={() => {
+              setEditingCustomEt(null);
+              setIsCustomEtModalOpen(true);
+            }}
+            onEditEt={(et) => {
+              setEditingCustomEt(et);
+              setIsCustomEtModalOpen(true);
+            }}
+          />
+        ) : (
+          /* Clean Chat Workspace View */
+          <>
+            <div
+              className="flex-1 overflow-y-auto px-4 sm:px-6 py-6 space-y-4 relative"
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDraggingOver(true);
               }}
-              disabled={isStreaming}
-            />
-
-            <div className="relative flex flex-col rounded-2xl bg-slate-900/90 border border-slate-700/80 focus-within:border-cyan-500/70 focus-within:shadow-[0_0_24px_rgba(6,182,212,0.25)] transition-all p-2.5">
-              <textarea
-                ref={textareaRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={
-                  activeLens === 'all'
-                    ? 'Consult Eric AI, search live web facts, speak via voice, or audit documents...'
-                    : `Consulting under ${FOCUS_AREAS.find((a) => a.id === activeLens)?.label}...`
+              onDragLeave={(e) => {
+                e.preventDefault();
+                setIsDraggingOver(false);
+              }}
+              onDrop={async (e) => {
+                e.preventDefault();
+                setIsDraggingOver(false);
+                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                  await processFileList(e.dataTransfer.files);
                 }
-                rows={1}
-                className="w-full bg-transparent text-slate-100 text-sm px-2.5 py-1 focus:outline-none placeholder:text-slate-500 resize-none max-h-44"
-              />
-
-              <div className="flex items-center justify-between pt-2 px-2 border-t border-slate-800/60 mt-1 flex-wrap gap-2">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={() => fileTriggerRef.current?.()}
-                    disabled={isStreaming}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-300 hover:bg-slate-800 transition-colors flex items-center gap-1 text-xs"
-                    title="Attach files (PDF, images, CSV, text)"
-                  >
-                    <Paperclip className="w-4 h-4 text-slate-400 hover:text-cyan-300" />
-                    <span className="hidden sm:inline text-[11px]">Attach</span>
-                  </button>
-
-                  {/* Google Search Grounding Toggle */}
-                  <button
-                    type="button"
-                    onClick={() => setUseWebSearch(!useWebSearch)}
-                    disabled={isStreaming}
-                    className={`p-1.5 px-2 rounded-lg transition-all flex items-center gap-1 text-xs border ${
-                      useWebSearch
-                        ? 'bg-emerald-950/60 text-emerald-300 border-emerald-700/60 shadow-[0_0_10px_rgba(16,185,129,0.15)]'
-                        : 'text-slate-400 hover:text-slate-200 border-transparent hover:bg-slate-800'
-                    }`}
-                    title={
-                      useWebSearch
-                        ? 'Google Search Grounding Active (Verifies live facts & sources)'
-                        : 'Enable Google Search Grounding'
-                    }
-                  >
-                    <Globe className={`w-3.5 h-3.5 ${useWebSearch ? 'text-emerald-400' : 'text-slate-400'}`} />
-                    <span className="text-[11px] font-medium">
-                      {useWebSearch ? 'Web Grounded' : 'Web Off'}
-                    </span>
-                  </button>
-
-                  {/* Quick Voice Dictation */}
-                  <button
-                    type="button"
-                    onClick={toggleQuickDictation}
-                    disabled={isStreaming}
-                    className={`p-1.5 px-2 rounded-lg transition-all flex items-center gap-1 text-xs border ${
-                      isDictating
-                        ? 'bg-red-950/80 text-red-300 border-red-600/60 animate-pulse'
-                        : 'text-slate-400 hover:text-cyan-300 border-transparent hover:bg-slate-800'
-                    }`}
-                    title="Dictate voice prompt into chat"
-                  >
-                    <Mic className={`w-3.5 h-3.5 ${isDictating ? 'text-red-400' : 'text-cyan-400'}`} />
-                    <span className="hidden sm:inline text-[11px]">
-                      {isDictating ? 'Listening...' : 'Dictate'}
-                    </span>
-                  </button>
-
-                  {/* Live Voice Conversation Modal Trigger */}
-                  <button
-                    type="button"
-                    onClick={() => setIsVoiceModalOpen(true)}
-                    disabled={isStreaming}
-                    className="p-1.5 px-2 rounded-lg text-slate-400 hover:text-cyan-300 hover:bg-slate-800 transition-colors flex items-center gap-1 text-xs"
-                    title="Launch two-way Live Voice Conversation"
-                  >
-                    <Radio className="w-3.5 h-3.5 text-cyan-400" />
-                    <span className="hidden md:inline text-[11px] text-cyan-400/90 font-medium">
-                      Live Voice
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setImageStudioPrompt(input.trim());
-                      setImageStudioOpen(true);
-                    }}
-                    disabled={isStreaming}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-300 hover:bg-slate-800 transition-colors flex items-center gap-1 text-xs"
-                    title="Generate visual mockup or image"
-                  >
-                    <ImageIcon className="w-4 h-4 text-cyan-400" />
-                    <span className="hidden lg:inline text-[11px] text-cyan-400/90 font-medium">
-                      Visual Studio
-                    </span>
-                  </button>
+              }}
+            >
+              {isDraggingOver && (
+                <div className="absolute inset-4 z-30 flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-cyan-400 bg-slate-950/95 backdrop-blur-md pointer-events-none">
+                  <FileUp className="w-12 h-12 text-cyan-400 mb-3 animate-bounce" />
+                  <div className="text-base font-bold text-slate-100">
+                    Drop Documents or Images into ChatET
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1 max-w-sm text-center">
+                    Attach PDFs, contracts, pitch decks, spreadsheets, or visual mockups.
+                  </p>
                 </div>
+              )}
 
-                <div className="flex items-center gap-2">
-                  {isStreaming ? (
+              {activeThread.messages.length === 0 ? (
+                /* Clean, Uncluttered Empty State */
+                <div className="max-w-2xl mx-auto py-8 sm:py-14 flex flex-col items-center text-center">
+                  <div className="mb-5">
+                    <EricHaloAvatar size="md" />
+                  </div>
+
+                  <div className="flex items-center gap-2 text-xs text-cyan-400 font-medium mb-2">
+                    <span>{activeCustomEt ? activeCustomEt.name : 'ChatET'}</span>
+                    <span aria-hidden="true">·</span>
+                    <span>
+                      {activeCustomEt
+                        ? activeCustomEt.tagline
+                        : 'Personal Thinking Partner for Eric Thomas'}
+                    </span>
+                  </div>
+
+                  <h1 className="text-2xl sm:text-3xl font-bold font-heading text-white tracking-tight mb-3">
+                    What are we working on today, Eric?
+                  </h1>
+
+                  <p className="text-sm text-slate-400 max-w-lg leading-relaxed mb-8">
+                    Direct, first-principles analysis across GOS strategy, Etsy &amp; POD economics, deal audits, 8K visual concepts, and family life.
+                  </p>
+
+                  {/* 4 Clean Starter Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full text-left mb-6">
+                    {(activeCustomEt?.starterPrompts && activeCustomEt.starterPrompts.length > 0
+                      ? activeCustomEt.starterPrompts.map((p, i) => ({
+                          title: `Starter 0${i + 1}`,
+                          prompt: p,
+                        }))
+                      : TAILORED_PROMPTS.slice(0, 4)
+                    ).map((item, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => handleSendMessage(item.prompt)}
+                        className="group p-4 rounded-2xl bg-slate-900/80 hover:bg-slate-900 border border-slate-800/90 hover:border-cyan-500/40 text-left transition-all flex flex-col justify-between gap-2"
+                      >
+                        <div>
+                          <div className="text-xs font-semibold text-cyan-400 mb-1">
+                            {item.title}
+                          </div>
+                          <p className="text-xs text-slate-300 line-clamp-2 leading-relaxed">
+                            {item.prompt}
+                          </p>
+                        </div>
+                        <div className="flex items-center justify-end text-[11px] text-slate-500 group-hover:text-cyan-400 transition-colors">
+                          <span>Ask ChatET</span>
+                          <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Link to Full Prompt Library */}
+                  <div className="flex items-center gap-4 text-xs text-slate-400">
                     <button
-                      onClick={handleStopStream}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-950/80 text-red-300 border border-red-800 text-xs font-medium hover:bg-red-900 transition-colors"
+                      onClick={() => setActiveTab('prompts')}
+                      className="text-cyan-400 hover:underline font-medium inline-flex items-center gap-1"
                     >
-                      <Square className="w-3.5 h-3.5 fill-current" />
-                      <span>Stop</span>
+                      <BookOpen className="w-3.5 h-3.5" />
+                      <span>Browse the full Prompt Library (14 playbooks)</span>
                     </button>
-                  ) : (
-                    <button
-                      onClick={() => handleSendMessage()}
-                      disabled={!input.trim() && attachments.length === 0}
-                      className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 text-white font-semibold text-xs tracking-wide shadow-[0_0_15px_rgba(6,182,212,0.4)] disabled:opacity-30 disabled:cursor-not-allowed transition-all active:scale-[0.98]"
-                    >
-                      <span>Inquire</span>
-                      <Send className="w-3.5 h-3.5" />
-                    </button>
-                  )}
+                    {activeCustomEt && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <button
+                          onClick={() => {
+                            setEditingCustomEt(activeCustomEt);
+                            setIsCustomEtModalOpen(true);
+                          }}
+                          className="text-slate-400 hover:text-white inline-flex items-center gap-1"
+                        >
+                          <Settings2 className="w-3.5 h-3.5" />
+                          <span>Configure {activeCustomEt.name}</span>
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                /* Active Message List */
+                <div className="max-w-3xl mx-auto space-y-4">
+                  {activeThread.messages.map((msg) => (
+                    <ChatMessage
+                      key={msg.id}
+                      message={msg}
+                      onClarify={(clarifyText) => handleSendMessage(clarifyText)}
+                      onOpenImageStudioWithPrompt={(p) => {
+                        setImageStudioPrompt(p);
+                        setImageStudioOpen(true);
+                      }}
+                      onMemoryDetected={handleMemoryDetected}
+                    />
+                  ))}
+                  <div ref={messagesEndRef} />
+                </div>
+              )}
+            </div>
+
+            {/* Clean, Minimal Input Bar Area */}
+            <div className="p-4 sm:px-6 sm:py-4 border-t border-slate-800/80 bg-[#090e17]/90 backdrop-blur-md flex-shrink-0">
+              <div className="max-w-3xl mx-auto">
+                <FileAttachmentBar
+                  attachments={attachments}
+                  onAddAttachments={(newAtts) => setAttachments((prev) => [...prev, ...newAtts])}
+                  onRemoveAttachment={(id) =>
+                    setAttachments((prev) => prev.filter((a) => a.id !== id))
+                  }
+                  onTriggerRef={(trigger) => {
+                    fileTriggerRef.current = trigger;
+                  }}
+                  disabled={isStreaming}
+                />
+
+                <div className="relative flex flex-col rounded-2xl bg-slate-900/90 border border-slate-700/80 focus-within:border-cyan-500/70 transition-all p-2.5">
+                  <textarea
+                    ref={textareaRef}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder={
+                      activeCustomEt
+                        ? `Message ${activeCustomEt.name}...`
+                        : 'Ask ChatET anything, drop a file to audit, or request an 8K visual...'
+                    }
+                    rows={1}
+                    className="w-full bg-transparent text-slate-100 text-sm px-2.5 py-1 focus:outline-none placeholder:text-slate-500 resize-none max-h-44"
+                  />
+
+                  <div className="flex items-center justify-between pt-2 px-1.5 mt-1">
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => fileTriggerRef.current?.()}
+                        disabled={isStreaming}
+                        className="p-1.5 px-2 rounded-lg text-slate-400 hover:text-cyan-300 hover:bg-slate-800 transition-colors flex items-center gap-1 text-xs"
+                        title="Attach files (PDF, images, CSV, text)"
+                      >
+                        <Paperclip className="w-4 h-4" />
+                        <span className="hidden sm:inline text-xs">Attach</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setUseWebSearch(!useWebSearch)}
+                        disabled={isStreaming}
+                        className={`p-1.5 px-2 rounded-lg transition-colors flex items-center gap-1 text-xs border ${
+                          useWebSearch
+                            ? 'bg-emerald-950/60 text-emerald-300 border-emerald-700/50'
+                            : 'text-slate-400 hover:text-slate-200 border-transparent hover:bg-slate-800'
+                        }`}
+                        title={
+                          useWebSearch
+                            ? 'Google Search Grounding Active'
+                            : 'Enable Google Search Grounding'
+                        }
+                      >
+                        <Globe
+                          className={`w-3.5 h-3.5 ${
+                            useWebSearch ? 'text-emerald-400' : 'text-slate-400'
+                          }`}
+                        />
+                        <span className="text-xs">{useWebSearch ? 'Web On' : 'Web Off'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={toggleQuickDictation}
+                        disabled={isStreaming}
+                        className={`p-1.5 px-2 rounded-lg transition-colors flex items-center gap-1 text-xs border ${
+                          isDictating
+                            ? 'bg-red-950/80 text-red-300 border-red-600/60 animate-pulse'
+                            : 'text-slate-400 hover:text-cyan-300 border-transparent hover:bg-slate-800'
+                        }`}
+                        title="Dictate voice prompt"
+                      >
+                        <Mic className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline text-xs">
+                          {isDictating ? 'Listening...' : 'Dictate'}
+                        </span>
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {isStreaming ? (
+                        <button
+                          onClick={handleStopStream}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-medium hover:bg-red-500 transition-colors"
+                        >
+                          <Square className="w-3.5 h-3.5 fill-current" />
+                          <span>Stop</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleSendMessage()}
+                          disabled={!input.trim() && attachments.length === 0}
+                          className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 text-white font-semibold text-xs tracking-wide disabled:opacity-30 disabled:cursor-not-allowed transition-all active:scale-[0.98]"
+                        >
+                          <span>Send</span>
+                          <Send className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
-
-            <div className="flex items-center justify-between px-2 pt-2 text-[11px] text-slate-500">
-              <span>
-                Private Advisor to Eric Thomas (ET Digital) • Search Grounded • Voice &amp; Cloud Enabled
-              </span>
-              <span className="font-mono text-slate-500">Honesty &gt; Helpfulness</span>
-            </div>
-          </div>
-        </div>
+          </>
+        )}
       </div>
 
       {/* Visual Image Studio Modal */}
@@ -1317,6 +1322,7 @@ export default function App() {
         onClose={() => setImageStudioOpen(false)}
         initialPrompt={imageStudioPrompt}
         onInsertToChat={(imageUrl, promptText) => {
+          setActiveTab('chat');
           handleSendMessage(
             `Here is a generated visual concept for "${promptText}":\n\n![${promptText}](${imageUrl})\n\nGive me your strategic and creative critique of this concept. What are the key leverage points, aesthetic strengths, and potential vulnerabilities?`
           );

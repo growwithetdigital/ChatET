@@ -112,7 +112,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `eric-ai-visual-${Date.now()}.jpg`;
+      link.download = `chatet-visual-${Date.now()}.jpg`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -133,10 +133,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
-                Eric AI Visual Studio
-                <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-800/60">
-                  Instant Generative
-                </span>
+                ChatET Visual Studio
               </h2>
               <p className="text-xs text-slate-400">
                 High-resolution conceptual rendering for GOS decks, POD mockups, luxury marketing & documentary treatments.

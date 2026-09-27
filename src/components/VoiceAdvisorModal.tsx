@@ -253,7 +253,7 @@ export const VoiceAdvisorModal: React.FC<VoiceAdvisorModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-bold font-heading text-white tracking-wide">
-                  ERIC AI • LIVE VOICE COUNSEL
+                  ChatET • Live Voice Mode
                 </h2>
                 {useWebSearch && (
                   <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-700/50 flex items-center gap-1">
@@ -371,7 +371,7 @@ export const VoiceAdvisorModal: React.FC<VoiceAdvisorModalProps> = ({
 
           {/* Status Label */}
           <div className="text-xs font-mono uppercase tracking-widest text-cyan-400 mb-3">
-            {status === 'idle' && 'Tap Microphone to Speak with Eric AI'}
+            {status === 'idle' && 'Tap Microphone to Speak with ChatET'}
             {status === 'listening' && 'Listening... Tap Stop Square When Done'}
             {status === 'transcribing' && 'Transcribing Audio via Gemini...'}
             {status === 'thinking' && 'Synthesizing Strategic Counsel...'}
@@ -398,7 +398,7 @@ export const VoiceAdvisorModal: React.FC<VoiceAdvisorModalProps> = ({
           {advisorReply && (
             <div className="w-full max-w-lg p-3.5 rounded-2xl bg-cyan-950/30 border border-cyan-500/30 text-left max-h-44 overflow-y-auto">
               <div className="text-[10px] font-mono uppercase text-cyan-400 mb-1 flex items-center justify-between">
-                <span>Eric AI Response:</span>
+                <span>ChatET Response:</span>
                 <Sparkles className="w-3 h-3" />
               </div>
               <p className="text-xs text-slate-200 leading-relaxed whitespace-pre-wrap">

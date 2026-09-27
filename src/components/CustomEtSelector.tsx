@@ -60,10 +60,10 @@ export const CustomEtSelector: React.FC<CustomEtSelectorProps> = ({
 
         <div className="flex flex-col">
           <span className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider font-semibold leading-none">
-            {activeEt ? 'Custom ET' : 'Core Advisor'}
+            {activeEt ? 'Custom ET' : 'Core Mode'}
           </span>
           <span className="text-xs font-bold text-white truncate max-w-[130px] sm:max-w-[170px] leading-tight mt-0.5">
-            {activeEt ? activeEt.name : 'Eric AI Standard'}
+            {activeEt ? activeEt.name : 'ChatET Standard'}
           </span>
         </div>
 
@@ -112,11 +112,11 @@ export const CustomEtSelector: React.FC<CustomEtSelectorProps> = ({
                 </div>
                 <div>
                   <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                    Eric AI (Core Advisor)
+                    ChatET (Core Advisor)
                     {activeEtId === null && <Check className="w-3.5 h-3.5 text-cyan-400" />}
                   </div>
                   <p className="text-[11px] text-slate-400 leading-snug mt-0.5">
-                    General thinking partner across all 6 strategic domains with the Seven Rules.
+                    All-around thinking partner with automatic first-principles &amp; Seven Rules reasoning.
                   </p>
                 </div>
               </div>

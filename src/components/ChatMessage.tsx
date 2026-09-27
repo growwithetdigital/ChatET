@@ -107,7 +107,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `eric-ai-render-${Date.now()}.jpg`;
+        a.download = `chatet-render-${Date.now()}.jpg`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -183,12 +183,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
           {isModel ? (
             <div className="flex items-center gap-2">
               <div className="flex items-center justify-center w-5 h-5 rounded-full bg-cyan-950 border border-cyan-400/60 text-cyan-300 font-bold text-[10px] shadow-[0_0_8px_rgba(6,182,212,0.4)]">
-                E
+                ET
               </div>
-              <span className="font-semibold text-slate-200 tracking-wide">Eric AI</span>
-              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-cyan-950/60 text-cyan-400 border border-cyan-900/60">
-                Personal Advisor
-              </span>
+              <span className="font-semibold text-slate-200 tracking-wide">ChatET</span>
             </div>
           ) : (
             <div className="flex items-center gap-2">
@@ -306,20 +303,18 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
           {/* Advisor Controls & 7 Rules Stamp */}
           {isModel && !message.isStreaming && (
             <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center justify-between gap-3 text-xs text-slate-400 flex-wrap">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 text-xs text-slate-400">
                 <span className="inline-flex items-center gap-1 text-[11px] text-cyan-400/90 font-mono">
                   <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
                   7 Rules Verified
                 </span>
                 {message.sources && message.sources.length > 0 && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950/70 text-emerald-300 border border-emerald-800/60 font-mono">
-                    Search Grounded
-                  </span>
-                )}
-                {message.focusArea && message.focusArea !== 'all' && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 uppercase font-mono">
-                    {message.focusArea}
-                  </span>
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span className="text-[11px] text-emerald-400 font-mono">
+                      Search Grounded
+                    </span>
+                  </>
                 )}
               </div>
 

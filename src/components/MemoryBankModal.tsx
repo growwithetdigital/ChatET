@@ -120,7 +120,7 @@ export const MemoryBankModal: React.FC<MemoryBankModalProps> = ({
                 type="text"
                 value={newContent}
                 onChange={(e) => setNewContent(e.target.value)}
-                placeholder="Teach Eric AI something to always remember (e.g. dog's name, retainer price, target clients)..."
+                placeholder="Teach ChatET something to always remember (e.g. dog's name, retainer price, target clients)..."
                 className="flex-1 px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-cyan-500"
               />
 
