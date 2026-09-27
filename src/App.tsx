@@ -62,6 +62,7 @@ import {
   saveMemoryToFirestore,
   deleteMemoryFromFirestore,
 } from './utils/firestoreSync';
+import { streamChatDirectFallback } from './utils/clientGeminiFallback';
 
 const STORAGE_KEY = 'eric_ai_threads_v1';
 const THEME_STORAGE_KEY = 'chat_et_theme_v1';
@@ -148,7 +149,7 @@ export default function App() {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [useWebSearch, setUseWebSearch] = useState(true);
+  const [useWebSearch, setUseWebSearch] = useState(false);
   const [isDictating, setIsDictating] = useState(false);
   const [noticeBanner, setNoticeBanner] = useState<string | null>(null);
 
@@ -646,6 +647,34 @@ export default function App() {
     let accumulatedText = '';
     let latestSources: GroundingSource[] | undefined = undefined;
 
+    const applyStreamUpdate = (textDelta: string, sourcesUpdate?: GroundingSource[]) => {
+      if (textDelta) {
+        accumulatedText += textDelta;
+      }
+      if (Array.isArray(sourcesUpdate) && sourcesUpdate.length > 0) {
+        latestSources = sourcesUpdate;
+      }
+      if (textDelta || sourcesUpdate) {
+        setThreads((prev) =>
+          prev.map((t) => {
+            if (t.id === targetThreadId) {
+              const msgs = [...t.messages];
+              const last = msgs[msgs.length - 1];
+              if (last && last.role === 'model') {
+                msgs[msgs.length - 1] = {
+                  ...last,
+                  content: accumulatedText,
+                  sources: latestSources,
+                };
+              }
+              return { ...t, messages: msgs };
+            }
+            return t;
+          })
+        );
+      }
+    };
+
     try {
       const messagesHistory = activeThread.messages.map((m) => ({
         role: m.role,
@@ -653,90 +682,102 @@ export default function App() {
         attachments: m.attachments,
       }));
 
-      const response = await fetch('/api/chat/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: messagesHistory,
-          currentPrompt: promptToSend,
-          focusArea: effectiveLens,
-          attachments: attachmentsToSend,
-          useWebSearch,
-          isVoiceMode,
-          customEt: effectiveCustomEt
-            ? {
-                name: effectiveCustomEt.name,
-                tagline: effectiveCustomEt.tagline,
-                instructions: effectiveCustomEt.instructions,
-                files: effectiveCustomEt.files,
+      const customEtPayload = effectiveCustomEt
+        ? {
+            name: effectiveCustomEt.name,
+            tagline: effectiveCustomEt.tagline,
+            instructions: effectiveCustomEt.instructions,
+            files: effectiveCustomEt.files,
+          }
+        : undefined;
+
+      const memoryPayload = memoryItems.map((m) => ({
+        id: m.id,
+        category: m.category,
+        content: m.content,
+      }));
+
+      let usedDirectFallback = false;
+
+      try {
+        const response = await fetch('/api/chat/stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: messagesHistory,
+            currentPrompt: promptToSend,
+            focusArea: effectiveLens,
+            attachments: attachmentsToSend,
+            useWebSearch,
+            isVoiceMode,
+            customEt: customEtPayload,
+            memoryItems: memoryPayload,
+          }),
+          signal: controller.signal,
+        });
+
+        if (!response.ok || !response.body) {
+          throw new Error(`Server status ${response.status}`);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let sseError: string | null = null;
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+
+          const rawChunk = decoder.decode(value, { stream: true });
+          const lines = rawChunk.split('\n');
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const jsonStr = line.replace('data: ', '').trim();
+              if (!jsonStr) continue;
+
+              try {
+                const parsed = JSON.parse(jsonStr);
+                if (parsed.error) {
+                  sseError = parsed.error;
+                }
+                applyStreamUpdate(parsed.text || '', parsed.sources);
+              } catch (err) {
+                console.warn('Could not parse SSE chunk', err);
               }
-            : undefined,
-          memoryItems: memoryItems.map((m) => ({
-            id: m.id,
-            category: m.category,
-            content: m.content,
-          })),
-        }),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        throw new Error(`Server status ${response.status}`);
-      }
-
-      if (!response.body) {
-        throw new Error('ReadableStream not supported on response');
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder('utf-8');
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        const rawChunk = decoder.decode(value, { stream: true });
-        const lines = rawChunk.split('\n');
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const jsonStr = line.replace('data: ', '').trim();
-            if (!jsonStr) continue;
-
-            try {
-              const parsed = JSON.parse(jsonStr);
-              if (parsed.text) {
-                accumulatedText += parsed.text;
-              }
-              if (Array.isArray(parsed.sources) && parsed.sources.length > 0) {
-                latestSources = parsed.sources;
-              }
-
-              if (parsed.text || parsed.sources) {
-                setThreads((prev) =>
-                  prev.map((t) => {
-                    if (t.id === targetThreadId) {
-                      const msgs = [...t.messages];
-                      const last = msgs[msgs.length - 1];
-                      if (last && last.role === 'model') {
-                        msgs[msgs.length - 1] = {
-                          ...last,
-                          content: accumulatedText,
-                          sources: latestSources,
-                        };
-                      }
-                      return { ...t, messages: msgs };
-                    }
-                    return t;
-                  })
-                );
-              }
-            } catch (err) {
-              console.warn('Could not parse SSE chunk', err);
             }
           }
         }
+
+        if (sseError && !accumulatedText) {
+          throw new Error(sseError);
+        }
+      } catch (serverErr: any) {
+        if (serverErr?.name === 'AbortError') {
+          throw serverErr;
+        }
+        // If backend route returned 404 (e.g. static/shared preview) or stream error, fall back to direct client Gemini stream
+        if (!accumulatedText) {
+          usedDirectFallback = true;
+          await streamChatDirectFallback({
+            messages: messagesHistory,
+            currentPrompt: promptToSend,
+            focusArea: effectiveLens,
+            attachments: attachmentsToSend,
+            useWebSearch,
+            isVoiceMode,
+            customEt: customEtPayload,
+            memoryItems: memoryPayload,
+            onChunk: (textDelta, sourcesUpdate) => {
+              applyStreamUpdate(textDelta, sourcesUpdate);
+            },
+          });
+        } else {
+          throw serverErr;
+        }
       }
+
+      void usedDirectFallback;
 
       const finalizedModelMsg: Message = {
         ...placeholderModelMessage,

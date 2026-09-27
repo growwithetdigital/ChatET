@@ -1,14 +1,10 @@
 import express from "express";
 import path from "path";
-import { fileURLToPath } from "url";
 import { GoogleGenAI } from "@google/genai";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 
 dotenv.config();
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = 3000;
@@ -115,7 +111,12 @@ You are equipped with high-resolution visual generative capability. Whenever Eri
 ## BOUNDARIES
 This is a personal tool, not a diagnostic one: don't offer legal, medical, tax, or financial advice as if it were a professional recommendation — give Eric the factual landscape and flag when he should check with someone licensed. Treat every conversation as private and don't reference other "users" — there aren't any.`;
 
-const MODELS_FALLBACK = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"];
+const MODELS_FALLBACK = [
+  "gemini-3.1-flash-lite",
+  "gemini-3-flash-preview",
+  "gemini-3.8-flash",
+  "gemini-flash-latest",
+];
 
 function extractGroundingSources(chunkOrResponse: any): Array<{ title: string; uri: string }> {
   const sources: Array<{ title: string; uri: string }> = [];
@@ -137,16 +138,18 @@ async function generateStreamWithFallback(
   ai: GoogleGenAI,
   contents: any[],
   systemInstruction: string,
-  useWebSearch = true
+  useWebSearch = false
 ) {
   let lastError: any = null;
+  let trySearch = useWebSearch;
+
   for (const model of MODELS_FALLBACK) {
     try {
       const config: any = {
         systemInstruction,
         temperature: 0.7,
       };
-      if (useWebSearch) {
+      if (trySearch) {
         config.tools = [{ googleSearch: {} }];
       }
       const responseStream = await ai.models.generateContentStream({
@@ -156,8 +159,9 @@ async function generateStreamWithFallback(
       });
       return { stream: responseStream, model };
     } catch (err: any) {
-      // If tool config caused an error on this model, try without tools before falling back
-      if (useWebSearch) {
+      // If Google Search tool failed (e.g. 429 search quota), disable search and immediately retry this model without tools
+      if (trySearch) {
+        trySearch = false;
         try {
           const responseStream = await ai.models.generateContentStream({
             model,
@@ -184,16 +188,18 @@ async function generateContentWithFallback(
   ai: GoogleGenAI,
   contents: any[],
   systemInstruction: string,
-  useWebSearch = true
+  useWebSearch = false
 ) {
   let lastError: any = null;
+  let trySearch = useWebSearch;
+
   for (const model of MODELS_FALLBACK) {
     try {
       const config: any = {
         systemInstruction,
         temperature: 0.7,
       };
-      if (useWebSearch) {
+      if (trySearch) {
         config.tools = [{ googleSearch: {} }];
       }
       const response = await ai.models.generateContent({
@@ -203,7 +209,8 @@ async function generateContentWithFallback(
       });
       return { response, model };
     } catch (err: any) {
-      if (useWebSearch) {
+      if (trySearch) {
+        trySearch = false;
         try {
           const response = await ai.models.generateContent({
             model,
@@ -400,7 +407,6 @@ app.post("/api/tts", async (req, res) => {
 
   try {
     const ai = getGeminiClient();
-    // Strip markdown artifacts for cleaner spoken delivery
     const cleanText = text
       .replace(/!\[.*?\]\(.*?\)/g, "")
       .replace(/\[MEMORY_RECORD:.*?\]/gi, "")
@@ -493,7 +499,7 @@ app.post("/api/transcribe", async (req, res) => {
       transcriptText = response.text || "";
     } catch {
       const fallbackRes = await ai.models.generateContent({
-        model: "gemini-3.8-flash",
+        model: "gemini-3-flash-preview",
         contents: {
           parts: [
             audioPart,
@@ -520,7 +526,7 @@ app.post("/api/chat/stream", async (req, res) => {
     attachments,
     customEt,
     memoryItems,
-    useWebSearch = true,
+    useWebSearch = false,
     isVoiceMode = false,
   } = req.body;
 
@@ -646,7 +652,7 @@ app.post("/api/chat", async (req, res) => {
     attachments,
     customEt,
     memoryItems,
-    useWebSearch = true,
+    useWebSearch = false,
     isVoiceMode = false,
   } = req.body;
 
@@ -737,7 +743,7 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Eric AI server listening on http://0.0.0.0:${PORT}`);
+    console.log(`ChatET server listening on http://0.0.0.0:${PORT}`);
   });
 }
 
