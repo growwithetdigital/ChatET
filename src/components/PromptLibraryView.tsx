@@ -10,6 +10,7 @@ import {
 export interface PromptPlaybookItem {
   id: string;
   category:
+    | 'budderfly'
     | 'gos'
     | 'audits'
     | 'visuals'
@@ -27,6 +28,54 @@ export interface PromptPlaybookItem {
 }
 
 export const PROMPT_LIBRARY_ITEMS: PromptPlaybookItem[] = [
+  {
+    id: 'pl-budderfly-concepts',
+    category: 'budderfly',
+    categoryLabel: 'Budderfly Collection',
+    capabilityTag: 'Stage 1 · 10 Concepts + 70s Prompts',
+    title: 'Budderfly: 10 Trend-Riding POD Concepts & 70s Screen-Print Prompts',
+    description:
+      'Attach Etsy bestseller screenshots (via Edit in Chat) or run directly to generate 10 original concepts across books, coffee, and silly humor with retro 70s screen-print prompts.',
+    prompt:
+      "You are a print-on-demand strategist. I'm building a Halloween shop across three niches: books, coffee, and silly humor. Based on these screenshots of current Etsy Halloween bestsellers, write me 10 original design concepts that ride these trends without copying anyone. For each concept, write an image generation prompt: retro vintage screen print style, faded 70s colors, no text, no lettering in the image, isolate on a plain white background.",
+    recommendedEtId: 'et-budderfly-pod',
+  },
+  {
+    id: 'pl-budderfly-etsy-seo',
+    category: 'budderfly',
+    categoryLabel: 'Budderfly Collection',
+    capabilityTag: 'Stage 2 · Etsy SEO Pack (10 Listings)',
+    title: 'Budderfly: 10-Listing Etsy SEO Pack (<140 Char Titles & 13 Tags)',
+    description:
+      'Writes front-loaded Etsy titles (<140 chars), 13 strict <=20-char tags, and two-paragraph descriptions for 10 shirt designs in a copy-ready numbered list.',
+    prompt:
+      "You're an Etsy SEO expert, and here are 10 Halloween shirt designs. For each one, write an Etsy title under 140 characters front-loading buyer search terms, 13 tags under 20 characters each, and a two-paragraph description. Format as a numbered list I can copy per listing.",
+    recommendedEtId: 'et-budderfly-pod',
+  },
+  {
+    id: 'pl-budderfly-pinterest',
+    category: 'budderfly',
+    categoryLabel: 'Budderfly Collection',
+    capabilityTag: 'Stage 3 · Pinterest SEO Multiplier',
+    title: 'Budderfly: 10-Listing Pinterest Pin Titles & Descriptions',
+    description:
+      'Turns all 10 Etsy shirt listings into high-discovery Pinterest Pin titles and keyword-matched descriptions to drive organic social search traffic.',
+    prompt:
+      'Write a Pinterest pin title and description for each of these 10 listings using the same keywords.',
+    recommendedEtId: 'et-budderfly-pod',
+  },
+  {
+    id: 'pl-budderfly-tiktok-reels',
+    category: 'budderfly',
+    categoryLabel: 'Budderfly Collection',
+    capabilityTag: 'Stage 4 · 15s TikTok & Reels Script',
+    title: 'Budderfly: 15-Second TikTok & Reels Shirt Showcase Script',
+    description:
+      'Scripts a tight 15-second vertical video with 0–3s visual hook, print texture reveal, on-screen text overlays, audio cue, and conversion CTA.',
+    prompt:
+      'Write me a 15-second video script showing off this shirt for TikTok and Reels.',
+    recommendedEtId: 'et-budderfly-pod',
+  },
   {
     id: 'pl-gos-counter',
     category: 'gos',
@@ -196,11 +245,12 @@ export const PROMPT_LIBRARY_ITEMS: PromptPlaybookItem[] = [
 
 const CATEGORIES = [
   { id: 'all', label: 'All Capabilities' },
+  { id: 'budderfly', label: 'Budderfly Collection' },
+  { id: 'pod', label: 'Etsy & POD Math' },
   { id: 'gos', label: 'GOS & B2B Growth' },
   { id: 'audits', label: 'Deal & Doc Audits' },
   { id: 'visuals', label: '8K Visuals & Mockups' },
   { id: 'web_intel', label: 'Live Web Intel' },
-  { id: 'pod', label: 'Etsy & POD Math' },
   { id: 'parenting', label: 'Parenting & Life' },
   { id: 'memory', label: 'Memory & Custom ETs' },
 ];
@@ -240,13 +290,13 @@ export const PromptLibraryView: React.FC<PromptLibraryViewProps> = ({
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-800/80 pb-6">
           <div>
             <div className="text-xs text-cyan-400 font-medium mb-1">
-              Playbooks · Multimodal · Live Search · 8K Renders
+              Budderfly Collection · Playbooks · Multimodal · Live Search · 8K Renders
             </div>
             <h1 className="text-2xl sm:text-3xl font-bold font-heading text-white tracking-tight">
               ChatET Prompt Library
             </h1>
             <p className="text-sm text-slate-400 mt-1 max-w-2xl">
-              Curated high-leverage prompts showcasing the sharpest things ChatET can do across growth strategy, deal redlining, POD unit math, 8K image generation, and family logistics.
+              Includes your 4-stage Budderfly Collection POD pipeline (Concepts &rarr; Etsy SEO &rarr; Pinterest &rarr; 15s TikTok/Reels) alongside GOS strategy, deal redlining, and family logistics.
             </p>
           </div>
 
