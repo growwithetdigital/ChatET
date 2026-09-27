@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Markdown from 'react-markdown';
 import {
   Copy,
@@ -14,10 +14,12 @@ import {
   X,
   Volume2,
   Square,
+  Pause,
+  Play,
   Globe,
 } from 'lucide-react';
 import { Message } from '../types';
-import { speakTextWithGemini, stopActiveSpeech } from '../utils/audioPlayer';
+import { speakWithWebSpeech, stopActiveSpeech, isWebSpeechSupported } from '../utils/audioPlayer';
 
 interface ChatMessageProps {
   message: Message;
@@ -33,8 +35,22 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [activeLightboxImg, setActiveLightboxImg] = useState<{ src: string; alt?: string } | null>(null);
+  const isSpeakingRef = useRef(false);
   const isModel = message.role === 'model';
+
+  // Preload browser speechSynthesis voices and clean up if unmounted while speaking
+  useEffect(() => {
+    if (isWebSpeechSupported()) {
+      window.speechSynthesis.getVoices();
+    }
+    return () => {
+      if (isSpeakingRef.current) {
+        stopActiveSpeech();
+      }
+    };
+  }, []);
 
   // Parse out any [MEMORY_RECORD: category="..." | content="..."] tags
   let cleanedContent = message.content;
@@ -54,7 +70,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   }
 
   // Trigger auto-save if newly detected
-  React.useEffect(() => {
+  useEffect(() => {
     if (isModel && !message.isStreaming && memoryMatches.length > 0 && onMemoryDetected) {
       for (const mem of memoryMatches) {
         onMemoryDetected(mem.category, mem.content);
@@ -68,18 +84,46 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleToggleSpeak = async () => {
+  const handleToggleSpeak = () => {
     if (isSpeaking) {
       stopActiveSpeech();
+      isSpeakingRef.current = false;
       setIsSpeaking(false);
+      setIsPaused(false);
       return;
     }
+
+    isSpeakingRef.current = true;
     setIsSpeaking(true);
-    await speakTextWithGemini(cleanedContent, {
-      voiceName: 'Charon',
-      onStart: () => setIsSpeaking(true),
-      onEnd: () => setIsSpeaking(false),
+    setIsPaused(false);
+
+    speakWithWebSpeech(cleanedContent, {
+      onStart: () => {
+        isSpeakingRef.current = true;
+        setIsSpeaking(true);
+      },
+      onEnd: () => {
+        isSpeakingRef.current = false;
+        setIsSpeaking(false);
+        setIsPaused(false);
+      },
+      onError: () => {
+        isSpeakingRef.current = false;
+        setIsSpeaking(false);
+        setIsPaused(false);
+      },
     });
+  };
+
+  const handleTogglePause = () => {
+    if (!isSpeaking || !isWebSpeechSupported()) return;
+    if (isPaused) {
+      window.speechSynthesis.resume();
+      setIsPaused(false);
+    } else {
+      window.speechSynthesis.pause();
+      setIsPaused(true);
+    }
   };
 
   const formattedTime = new Intl.DateTimeFormat('en-US', {
@@ -196,6 +240,31 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
             </div>
           )}
           <span className="text-[10px] text-slate-400 font-mono">{formattedTime}</span>
+
+          {isModel && !message.isStreaming && isWebSpeechSupported() && (
+            <button
+              type="button"
+              onClick={handleToggleSpeak}
+              className={`ml-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors ${
+                isSpeaking
+                  ? 'bg-cyan-950 text-cyan-300 border border-cyan-500/50'
+                  : 'text-slate-400 hover:text-cyan-300 hover:bg-slate-800/70'
+              }`}
+              title={isSpeaking ? 'Stop audio playback' : 'Listen to ChatET response (Web Speech API)'}
+            >
+              {isSpeaking ? (
+                <>
+                  <Square className="w-2.5 h-2.5 fill-current text-cyan-400" />
+                  <span>Stop</span>
+                </>
+              ) : (
+                <>
+                  <Volume2 className="w-3 h-3" />
+                  <span>Listen</span>
+                </>
+              )}
+            </button>
+          )}
         </div>
 
         {/* Message Bubble Container */}
@@ -319,29 +388,60 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
               </div>
 
               <div className="flex items-center gap-1.5">
-                <button
-                  onClick={handleToggleSpeak}
-                  className={`p-1 px-2 rounded transition-colors flex items-center gap-1 text-[11px] ${
-                    isSpeaking
-                      ? 'bg-cyan-950 text-cyan-300 border border-cyan-600/50'
-                      : 'hover:bg-slate-800 hover:text-cyan-300'
-                  }`}
-                  title={isSpeaking ? 'Stop spoken audio' : 'Read counsel aloud (Gemini TTS)'}
-                >
-                  {isSpeaking ? (
-                    <>
-                      <Square className="w-3 h-3 fill-current text-cyan-400" />
-                      <span className="text-[10px] font-medium">Stop Audio</span>
-                    </>
-                  ) : (
-                    <>
-                      <Volume2 className="w-3.5 h-3.5" />
-                      <span className="text-[10px]">Listen</span>
-                    </>
-                  )}
-                </button>
+                {isWebSpeechSupported() && (
+                  <div className="inline-flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={handleToggleSpeak}
+                      className={`p-1 px-2 rounded transition-colors flex items-center gap-1 text-[11px] ${
+                        isSpeaking
+                          ? 'bg-cyan-950 text-cyan-300 border border-cyan-600/50'
+                          : 'hover:bg-slate-800 hover:text-cyan-300'
+                      }`}
+                      title={
+                        isSpeaking
+                          ? 'Stop audio playback'
+                          : 'Listen to response using Web Speech API'
+                      }
+                    >
+                      {isSpeaking ? (
+                        <>
+                          <Square className="w-3 h-3 fill-current text-cyan-400" />
+                          <span className="text-[10px] font-medium">Stop</span>
+                        </>
+                      ) : (
+                        <>
+                          <Volume2 className="w-3.5 h-3.5" />
+                          <span className="text-[10px]">Listen</span>
+                        </>
+                      )}
+                    </button>
+
+                    {isSpeaking && (
+                      <button
+                        type="button"
+                        onClick={handleTogglePause}
+                        className="p-1 px-2 rounded bg-slate-800/90 hover:bg-slate-700 text-cyan-300 border border-slate-700 transition-colors flex items-center gap-1 text-[11px]"
+                        title={isPaused ? 'Resume audio playback' : 'Pause audio playback'}
+                      >
+                        {isPaused ? (
+                          <>
+                            <Play className="w-3 h-3 fill-current" />
+                            <span className="text-[10px]">Resume</span>
+                          </>
+                        ) : (
+                          <>
+                            <Pause className="w-3 h-3" />
+                            <span className="text-[10px]">Pause</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 <button
+                  type="button"
                   onClick={handleCopy}
                   className="p-1 rounded hover:bg-slate-800 hover:text-slate-200 transition-colors flex items-center gap-1 text-[11px]"
                   title="Copy counsel text"
@@ -361,6 +461,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
 
                 {onClarify && (
                   <button
+                    type="button"
                     onClick={() => onClarify("Could you drill deeper into the specific tradeoffs and missing variables here?")}
                     className="p-1 rounded hover:bg-slate-800 hover:text-cyan-300 transition-colors flex items-center gap-1 text-[11px]"
                     title="Prompt follow-up depth"
