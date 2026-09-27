@@ -1,0 +1,237 @@
+{
+  "entities": {
+    "Thread": {
+      "title": "Thread",
+      "description": "Represents an executive advisory conversation thread owned by an authenticated user.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "The UID of the authenticated user who owns this thread.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "description": "Display title of the consultation thread.",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "focusArea": {
+          "type": "string",
+          "description": "Active strategic lens for the consultation thread.",
+          "enum": ["all", "gos", "ventures", "parenting", "first_principles", "life_personal"],
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "customEtId": {
+          "type": "string",
+          "description": "ID of the active Custom ET agent or 'none' if using Core Eric AI.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "pinned": {
+          "type": "boolean",
+          "description": "Whether the consultation is pinned to the top of the sidebar."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the thread was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the thread was last updated."
+        }
+      },
+      "required": ["ownerId", "title", "focusArea", "customEtId", "pinned", "createdAt", "updatedAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Represents an individual message within a consultation thread.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "The UID of the authenticated user who owns this message.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "threadId": {
+          "type": "string",
+          "description": "The document ID of the parent Thread.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "role": {
+          "type": "string",
+          "description": "Sender role of the message.",
+          "enum": ["user", "model"],
+          "minLength": 4,
+          "maxLength": 10
+        },
+        "content": {
+          "type": "string",
+          "description": "Markdown text content of the message.",
+          "minLength": 1,
+          "maxLength": 100000
+        },
+        "focusArea": {
+          "type": "string",
+          "description": "Strategic lens active when the message was created.",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "sourcesText": {
+          "type": "string",
+          "description": "Formatted citation links from Google Search grounding.",
+          "minLength": 0,
+          "maxLength": 10000
+        },
+        "msgTimestamp": {
+          "type": "integer",
+          "description": "Epoch milliseconds for chronological message ordering."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the message was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the message was last updated."
+        }
+      },
+      "required": ["ownerId", "threadId", "role", "content", "focusArea", "sourcesText", "msgTimestamp", "createdAt", "updatedAt"]
+    },
+    "CustomET": {
+      "title": "CustomET",
+      "description": "Represents a user-created Custom ET (specialized advisor gem with custom instructions and knowledge base).",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "The UID of the authenticated user who owns this Custom ET.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the Custom ET advisor.",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "tagline": {
+          "type": "string",
+          "description": "Short description or domain scope of the Custom ET.",
+          "minLength": 1,
+          "maxLength": 250
+        },
+        "instructions": {
+          "type": "string",
+          "description": "Custom system prompt directives for the Custom ET.",
+          "minLength": 1,
+          "maxLength": 25000
+        },
+        "focusArea": {
+          "type": "string",
+          "description": "Default strategic lens associated with the Custom ET.",
+          "enum": ["all", "gos", "ventures", "parenting", "first_principles", "life_personal"],
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "color": {
+          "type": "string",
+          "description": "Gradient color class identifier.",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "knowledgeText": {
+          "type": "string",
+          "description": "Combined text content extracted from uploaded knowledge documents.",
+          "minLength": 0,
+          "maxLength": 150000
+        },
+        "knowledgeFileNames": {
+          "type": "string",
+          "description": "Pipe-delimited summary of uploaded knowledge document names and sizes.",
+          "minLength": 0,
+          "maxLength": 2000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the Custom ET was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the Custom ET was last updated."
+        }
+      },
+      "required": ["ownerId", "name", "tagline", "instructions", "focusArea", "color", "knowledgeText", "knowledgeFileNames", "createdAt", "updatedAt"]
+    },
+    "MemoryItem": {
+      "title": "MemoryItem",
+      "description": "Represents a persistent cross-session fact stored in Eric's Memory Bank.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "The UID of the authenticated user who owns this memory item.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "category": {
+          "type": "string",
+          "description": "Domain category of the remembered fact.",
+          "enum": ["business", "personal", "parenting", "preference", "rule"],
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "content": {
+          "type": "string",
+          "description": "The concise fact remembered across sessions.",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the memory was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the memory was last updated."
+        }
+      },
+      "required": ["ownerId", "category", "content", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/threads/{threadId}": {
+      "schema": { "$ref": "#/entities/Thread" },
+      "description": "Stores executive consultation thread metadata owned by individual users."
+    },
+    "/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Stores individual chat messages linked to a parent thread."
+    },
+    "/customEts/{etId}": {
+      "schema": { "$ref": "#/entities/CustomET" },
+      "description": "Stores custom ET personas, instructions, and knowledge base text owned by individual users."
+    },
+    "/memories/{memoryId}": {
+      "schema": { "$ref": "#/entities/MemoryItem" },
+      "description": "Stores persistent cross-session memory facts owned by individual users."
+    }
+  }
+}

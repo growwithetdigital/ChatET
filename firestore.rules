@@ -1,0 +1,283 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // Hardened Global Primitives
+    // =========================================================================
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidFocusArea(area) {
+      return area is string
+        && area.size() >= 1
+        && area.size() <= 32
+        && area in ['all', 'gos', 'ventures', 'parenting', 'first_principles', 'life_personal'];
+    }
+
+    // =========================================================================
+    // Entity Validation Blueprints (Anti-Update-Gap)
+    // =========================================================================
+    function isValidThread(data) {
+      return data.keys().hasAll(['ownerId', 'title', 'focusArea', 'customEtId', 'pinned', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'title', 'focusArea', 'customEtId', 'pinned', 'createdAt', 'updatedAt'])
+        && data.ownerId is string
+        && data.ownerId.size() >= 1
+        && data.ownerId.size() <= 128
+        && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.ownerId == request.auth.uid
+        && data.title is string
+        && data.title.size() >= 1
+        && data.title.size() <= 200
+        && isValidFocusArea(data.focusArea)
+        && data.customEtId is string
+        && data.customEtId.size() >= 1
+        && data.customEtId.size() <= 128
+        && data.pinned is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidChatMessage(data) {
+      return data.keys().hasAll(['ownerId', 'threadId', 'role', 'content', 'focusArea', 'sourcesText', 'msgTimestamp', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'threadId', 'role', 'content', 'focusArea', 'sourcesText', 'msgTimestamp', 'createdAt', 'updatedAt'])
+        && data.ownerId is string
+        && data.ownerId.size() >= 1
+        && data.ownerId.size() <= 128
+        && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.ownerId == request.auth.uid
+        && isValidId(data.threadId)
+        && data.role is string
+        && data.role.size() >= 4
+        && data.role.size() <= 10
+        && data.role in ['user', 'model']
+        && data.content is string
+        && data.content.size() >= 1
+        && data.content.size() <= 100000
+        && data.focusArea is string
+        && data.focusArea.size() >= 1
+        && data.focusArea.size() <= 32
+        && data.sourcesText is string
+        && data.sourcesText.size() >= 0
+        && data.sourcesText.size() <= 10000
+        && data.msgTimestamp is int
+        && data.msgTimestamp > 0
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCustomET(data) {
+      return data.keys().hasAll(['ownerId', 'name', 'tagline', 'instructions', 'focusArea', 'color', 'knowledgeText', 'knowledgeFileNames', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'name', 'tagline', 'instructions', 'focusArea', 'color', 'knowledgeText', 'knowledgeFileNames', 'createdAt', 'updatedAt'])
+        && data.ownerId is string
+        && data.ownerId.size() >= 1
+        && data.ownerId.size() <= 128
+        && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.ownerId == request.auth.uid
+        && data.name is string
+        && data.name.size() >= 1
+        && data.name.size() <= 100
+        && data.tagline is string
+        && data.tagline.size() >= 1
+        && data.tagline.size() <= 250
+        && data.instructions is string
+        && data.instructions.size() >= 1
+        && data.instructions.size() <= 25000
+        && isValidFocusArea(data.focusArea)
+        && data.color is string
+        && data.color.size() >= 1
+        && data.color.size() <= 64
+        && data.knowledgeText is string
+        && data.knowledgeText.size() >= 0
+        && data.knowledgeText.size() <= 150000
+        && data.knowledgeFileNames is string
+        && data.knowledgeFileNames.size() >= 0
+        && data.knowledgeFileNames.size() <= 2000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidMemoryItem(data) {
+      return data.keys().hasAll(['ownerId', 'category', 'content', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'category', 'content', 'createdAt', 'updatedAt'])
+        && data.ownerId is string
+        && data.ownerId.size() >= 1
+        && data.ownerId.size() <= 128
+        && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.ownerId == request.auth.uid
+        && data.category is string
+        && data.category.size() >= 1
+        && data.category.size() <= 32
+        && data.category in ['business', 'personal', 'parenting', 'preference', 'rule']
+        && data.content is string
+        && data.content.size() >= 1
+        && data.content.size() <= 2000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // =========================================================================
+    // Collection: /threads/{threadId}
+    // =========================================================================
+    match /threads/{threadId} {
+      allow get: if isVerified()
+        && isValidId(threadId)
+        && existing().ownerId == request.auth.uid;
+
+      allow list: if isVerified()
+        && resource.data.ownerId == request.auth.uid;
+
+      allow create: if isVerified()
+        && isValidId(threadId)
+        && isValidThread(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerified()
+        && isValidId(threadId)
+        && isValidThread(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action 1: Update thread metadata (title, focusArea, customEtId, pinned)
+          incoming().diff(existing()).affectedKeys().hasOnly(['title', 'focusArea', 'customEtId', 'pinned', 'updatedAt'])
+        );
+
+      allow delete: if isVerified()
+        && isValidId(threadId)
+        && existing().ownerId == request.auth.uid;
+    }
+
+    // =========================================================================
+    // Collection: /messages/{messageId}
+    // =========================================================================
+    match /messages/{messageId} {
+      allow get: if isVerified()
+        && isValidId(messageId)
+        && existing().ownerId == request.auth.uid;
+
+      allow list: if isVerified()
+        && resource.data.ownerId == request.auth.uid;
+
+      allow create: if isVerified()
+        && isValidId(messageId)
+        && isValidChatMessage(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/threads/$(incoming().threadId))
+        && get(/databases/$(database)/documents/threads/$(incoming().threadId)).data.ownerId == request.auth.uid;
+
+      allow update: if isVerified()
+        && isValidId(messageId)
+        && isValidChatMessage(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().ownerId == existing().ownerId
+        && incoming().threadId == existing().threadId
+        && incoming().role == existing().role
+        && incoming().msgTimestamp == existing().msgTimestamp
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action 1: Finalize or update message content & grounding sources
+          incoming().diff(existing()).affectedKeys().hasOnly(['content', 'sourcesText', 'updatedAt'])
+        );
+
+      allow delete: if isVerified()
+        && isValidId(messageId)
+        && existing().ownerId == request.auth.uid;
+    }
+
+    // =========================================================================
+    // Collection: /customEts/{etId}
+    // =========================================================================
+    match /customEts/{etId} {
+      allow get: if isVerified()
+        && isValidId(etId)
+        && existing().ownerId == request.auth.uid;
+
+      allow list: if isVerified()
+        && resource.data.ownerId == request.auth.uid;
+
+      allow create: if isVerified()
+        && isValidId(etId)
+        && isValidCustomET(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerified()
+        && isValidId(etId)
+        && isValidCustomET(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action 1: Configure Custom ET parameters and knowledge base
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'tagline', 'instructions', 'focusArea', 'color', 'knowledgeText', 'knowledgeFileNames', 'updatedAt'])
+        );
+
+      allow delete: if isVerified()
+        && isValidId(etId)
+        && existing().ownerId == request.auth.uid;
+    }
+
+    // =========================================================================
+    // Collection: /memories/{memoryId}
+    // =========================================================================
+    match /memories/{memoryId} {
+      allow get: if isVerified()
+        && isValidId(memoryId)
+        && existing().ownerId == request.auth.uid;
+
+      allow list: if isVerified()
+        && resource.data.ownerId == request.auth.uid;
+
+      allow create: if isVerified()
+        && isValidId(memoryId)
+        && isValidMemoryItem(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerified()
+        && isValidId(memoryId)
+        && isValidMemoryItem(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action 1: Edit memory content or category
+          incoming().diff(existing()).affectedKeys().hasOnly(['category', 'content', 'updatedAt'])
+        );
+
+      allow delete: if isVerified()
+        && isValidId(memoryId)
+        && existing().ownerId == request.auth.uid;
+    }
+  }
+}

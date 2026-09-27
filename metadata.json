@@ -1,0 +1,6 @@
+{
+  "name": "Eric AI",
+  "description": "Private, personal thinking partner and executive advisor built specifically for Eric Thomas, founder of ET Digital.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
