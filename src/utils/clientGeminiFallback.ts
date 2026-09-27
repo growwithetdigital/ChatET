@@ -1,13 +1,36 @@
 import { GoogleGenAI } from '@google/genai';
 import { FileAttachment, GroundingSource } from '../types';
 
+export function getLivePacificTimeString(): string {
+  try {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Los_Angeles',
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'short',
+    });
+    return `${formatter.format(new Date())} (PST / Pacific Time)`;
+  } catch {
+    return `${new Date().toLocaleString()} (Pacific Time)`;
+  }
+}
+
 const CHATET_SYSTEM_INSTRUCTION = `You are "ChatET" — a private, personal advisor built for one user: Eric Thomas.
 You are not a general-purpose product; you exist to be the sharpest, most honest thinking partner Eric has access to, across every part of his life.
+
+## 0. LIVE REAL-TIME CLOCK & TEMPORAL ANCHOR (NON-NEGOTIABLE)
+- We are currently in **late September 2026** (specifically **Sunday, September 27, 2026**, Pacific Time).
+- **CRITICAL OVERRIDE:** NEVER state or imply that "as of today, we are in late 2024" or "2025", and NEVER claim that 2026 is in the future or that 2026 schedules/data do not exist yet. Your pre-training cutoff was earlier, so you MUST anchor all temporal reasoning to the live date injected below.
+- Treat 2024 and 2025 as the past, and **September 27, 2026** as TODAY.
 
 ## 1. CLEAR PERSONA & TONE
 - You are a witty, energetic, incisive, and deeply knowledgeable executive thinking partner. Keep your responses engaging, clear, and direct.
 - Who you're talking to: Eric is a senior marketing strategist (20+ years across entertainment, media, luxury retail, and real estate), founder of a growth-strategy studio (ET Digital / the "GOS" framework), an active entrepreneur (print-on-demand/Etsy business, a media/documentary studio in development), a divorced father of two teenagers, and someone with a graduate degree who wants real analysis, not filler.
-- He asks about everything: parenting and co-parenting, career strategy, entrepreneurship, finances, cities, culture, his dog, relationships, and big-picture questions about science, technology, and life. Match that range with sharp dry wit and intellectual rigor — never dumb anything down, and never moralize on ordinary adult topics.
+- He asks about everything: parenting and co-parenting, career strategy, entrepreneurship, finances, cities, culture, sports, his dog, relationships, and big-picture questions about science, technology, and life. Match that range with sharp dry wit and intellectual rigor — never dumb anything down, and never moralize on ordinary adult topics.
 
 ## 2. STEP-BY-STEP REASONING GUIDELINES
 Before delivering your final recommendation on any complex or strategic question, think through the problem step-by-step using these four habits of mind (as an analytical approach, never as impersonation of a named person):
@@ -66,7 +89,7 @@ Never claim to be channeling, quoting, or speaking "as" any specific named real 
 1. UNCERTAINTY: If you're not fully certain, say so plainly — "I'm not certain, but..." Never state a guess as a fact.
 2. SOURCES: Never invent paper titles, authors, or URLs. When Google Search grounding is active, rely on verified web sources. If you don't have a real, verifiable source, say "I don't have a verified source for this."
 3. STATISTICS: Flag any number you're not fully confident in as approximate, and say so.
-4. RECENT EVENTS: Use Google Search grounding when available to verify current facts; if something remains unverified since your training data, say so plainly.
+4. RECENT EVENTS: Always anchor to the current real-world date (September 2026). If something remains unverified since your training data and isn't in the live feed, say so plainly without claiming the year is 2024.
 5. PEOPLE & QUOTES: Never attribute a quote to a real person unless certain it's accurate. When unsure: "I can't confirm this quote is accurate."
 6. CODE/TECHNICAL: Never invent function names, library methods, or API syntax. If unsure something exists, say to verify it in current docs.
 7. LOGIC GAPS: Don't fill missing context with assumptions — ask a clarifying question when something is genuinely unclear, rather than guessing at what Eric meant.
@@ -159,8 +182,9 @@ function assembleSystemInstruction(options: {
   customEt?: any;
   memoryItems?: any[];
   isVoiceMode?: boolean;
+  liveDateTimePST: string;
 }): string {
-  let instruction = CHATET_SYSTEM_INSTRUCTION;
+  let instruction = `${CHATET_SYSTEM_INSTRUCTION}\n\n[LIVE SYSTEM CLOCK: Today is ${options.liveDateTimePST}. All references to "today", "tonight", "this week", "current year", or "now" refer to ${options.liveDateTimePST}.]`;
 
   if (options.customEt) {
     instruction += `\n\n==================================================\n`;
@@ -241,6 +265,7 @@ export async function streamChatDirectFallback(params: {
   }
 
   const ai = new GoogleGenAI({ apiKey });
+  const liveDateTimePST = getLivePacificTimeString();
 
   const rawContents: Array<{ role: 'user' | 'model'; parts: any[] }> = [];
   if (Array.isArray(params.messages)) {
@@ -260,7 +285,8 @@ export async function streamChatDirectFallback(params: {
     }
   }
 
-  const currentParts = buildUserParts(params.currentPrompt, params.attachments);
+  const promptWithClock = `[LIVE REAL-TIME SYSTEM CLOCK: ${liveDateTimePST}]\n\n${params.currentPrompt}`;
+  const currentParts = buildUserParts(promptWithClock, params.attachments);
   if (currentParts.length > 0) {
     rawContents.push({ role: 'user', parts: currentParts });
   }
@@ -271,46 +297,25 @@ export async function streamChatDirectFallback(params: {
     customEt: params.customEt,
     memoryItems: params.memoryItems,
     isVoiceMode: params.isVoiceMode,
+    liveDateTimePST,
   });
 
   let responseStream: any = null;
   let lastError: any = null;
-  let trySearch = Boolean(params.useWebSearch);
 
   for (const model of FALLBACK_MODELS) {
     try {
-      const config: any = {
-        systemInstruction,
-        temperature: 0.7,
-      };
-      if (trySearch) {
-        config.tools = [{ googleSearch: {} }];
-      }
       responseStream = await ai.models.generateContentStream({
         model,
         contents: formattedContents,
-        config,
+        config: {
+          systemInstruction,
+          temperature: 0.7,
+        },
       });
       break;
     } catch (err: any) {
-      if (trySearch) {
-        trySearch = false;
-        try {
-          responseStream = await ai.models.generateContentStream({
-            model,
-            contents: formattedContents,
-            config: {
-              systemInstruction,
-              temperature: 0.7,
-            },
-          });
-          break;
-        } catch (innerErr: any) {
-          lastError = innerErr;
-        }
-      } else {
-        lastError = err;
-      }
+      lastError = err;
     }
   }
 

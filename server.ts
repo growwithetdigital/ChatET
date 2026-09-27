@@ -28,13 +28,53 @@ function getGeminiClient(): GoogleGenAI {
   return geminiClient;
 }
 
+function getFormattedPacificNow(clientTimestamp?: string): {
+  fullDateTimePST: string;
+  isoDatePST: string;
+  compactDateYYYYMMDD: string;
+} {
+  const now = new Date();
+  const fullFormatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  });
+
+  const partsFormatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = partsFormatter.formatToParts(now);
+  const year = parts.find((p) => p.type === "year")?.value || "2026";
+  const month = parts.find((p) => p.type === "month")?.value || "09";
+  const day = parts.find((p) => p.type === "day")?.value || "27";
+
+  return {
+    fullDateTimePST: clientTimestamp || `${fullFormatter.format(now)} (PST / Pacific Time)`,
+    isoDatePST: `${year}-${month}-${day}`,
+    compactDateYYYYMMDD: `${year}${month}${day}`,
+  };
+}
+
 const ERIC_AI_SYSTEM_INSTRUCTION = `You are "ChatET" — a private, personal advisor built for one user: Eric Thomas.
 You are not a general-purpose product; you exist to be the sharpest, most honest thinking partner Eric has access to, across every part of his life.
+
+## 0. LIVE REAL-TIME CLOCK & TEMPORAL ANCHOR (NON-NEGOTIABLE)
+- We are currently in **late September 2026** (specifically **Sunday, September 27, 2026**, Pacific Time).
+- **CRITICAL OVERRIDE:** NEVER state or imply that "as of today, we are in late 2024" or "2025", and NEVER claim that 2026 is in the future or that 2026 schedules/data do not exist yet. Your pre-training cutoff was earlier, so you MUST anchor all temporal reasoning to the live date injected below and the verified real-time web/schedule data provided in the prompt context.
+- Treat 2024 and 2025 as the past, and **September 27, 2026** as TODAY.
 
 ## 1. CLEAR PERSONA & TONE
 - You are a witty, energetic, incisive, and deeply knowledgeable executive thinking partner. Keep your responses engaging, clear, and direct.
 - Who you're talking to: Eric is a senior marketing strategist (20+ years across entertainment, media, luxury retail, and real estate), founder of a growth-strategy studio (ET Digital / the "GOS" framework), an active entrepreneur (print-on-demand/Etsy business, a media/documentary studio in development), a divorced father of two teenagers, and someone with a graduate degree who wants real analysis, not filler.
-- He asks about everything: parenting and co-parenting, career strategy, entrepreneurship, finances, cities, culture, his dog, relationships, and big-picture questions about science, technology, and life. Match that range with sharp dry wit and intellectual rigor — never dumb anything down, and never moralize on ordinary adult topics.
+- He asks about everything: parenting and co-parenting, career strategy, entrepreneurship, finances, cities, culture, sports, his dog, relationships, and big-picture questions about science, technology, and life. Match that range with sharp dry wit and intellectual rigor — never dumb anything down, and never moralize on ordinary adult topics.
 
 ## 2. STEP-BY-STEP REASONING GUIDELINES
 Before delivering your final recommendation on any complex or strategic question, think through the problem step-by-step using these four habits of mind (as an analytical approach, never as impersonation of a named person):
@@ -91,9 +131,9 @@ Never claim to be channeling, quoting, or speaking "as" any specific named real 
 
 ## THE SEVEN RULES (non-negotiable, in every relevant response)
 1. UNCERTAINTY: If you're not fully certain, say so plainly — "I'm not certain, but..." Never state a guess as a fact.
-2. SOURCES: Never invent paper titles, authors, or URLs. When Google Search grounding is active, rely on verified web sources. If you don't have a real, verifiable source, say "I don't have a verified source for this."
+2. SOURCES: Never invent paper titles, authors, or URLs. When live web/search data is provided, rely on those verified sources. If you don't have a real, verifiable source, say "I don't have a verified source for this."
 3. STATISTICS: Flag any number you're not fully confident in as approximate, and say so.
-4. RECENT EVENTS: Use Google Search grounding when available to verify current facts; if something remains unverified since your training data, say so plainly.
+4. RECENT EVENTS: Always anchor to the current real-world date (September 2026) and the live web/sports grounding data supplied in the context. If a specific detail isn't in the live feed, state what is verified and what isn't.
 5. PEOPLE & QUOTES: Never attribute a quote to a real person unless certain it's accurate. When unsure: "I can't confirm this quote is accurate."
 6. CODE/TECHNICAL: Never invent function names, library methods, or API syntax. If unsure something exists, say to verify it in current docs.
 7. LOGIC GAPS: Don't fill missing context with assumptions — ask a clarifying question when something is genuinely unclear, rather than guessing at what Eric meant.
@@ -118,6 +158,264 @@ const MODELS_FALLBACK = [
   "gemini-flash-latest",
 ];
 
+function decodeHtmlEntities(str: string): string {
+  return str
+    .replace(/&amp;/g, "&")
+    .replace(/&#x27;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/<[^>]+>/g, "")
+    .trim();
+}
+
+/**
+ * Fetches live 2026 web search results, news RSS items, and live sports scoreboards
+ * directly on the server so ChatET always has up-to-the-minute September 2026 facts
+ * even when Gemini's native search tool quota is rate-limited.
+ */
+async function fetchLiveWebAndSportsContext(
+  prompt: string,
+  compactDateYYYYMMDD: string
+): Promise<{
+  contextBlock: string;
+  sources: Array<{ title: string; uri: string }>;
+}> {
+  const sources: Array<{ title: string; uri: string }> = [];
+  const sections: string[] = [];
+
+  const cleanQuery = prompt.replace(/\s+/g, " ").trim().slice(0, 180);
+  if (!cleanQuery) {
+    return { contextBlock: "", sources: [] };
+  }
+
+  const lower = cleanQuery.toLowerCase();
+  const isSportsOrGamesQuery =
+    /\b(game|games|schedule|schedules|score|scores|nfl|football|ncaaf|college football|mlb|baseball|nba|wnba|basketball|nhl|hockey|soccer|premier league|matchup|kickoff|playing today|who plays|tonight|sunday)\b/i.test(
+      lower
+    );
+
+  // Add "September 2026" context to search query if it asks about temporal/current info without a year
+  const searchQuery = /\b202\d\b/.test(cleanQuery)
+    ? cleanQuery
+    : `${cleanQuery} September 2026`;
+
+  const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeoutMs = 3200) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const tasks: Promise<void>[] = [];
+
+  // 1. Live ESPN Sports Scoreboard & Schedule (NFL, MLB, NCAAF, WNBA)
+  if (isSportsOrGamesQuery) {
+    tasks.push(
+      (async () => {
+        const leagues: Array<{ label: string; url: string; pageUrl: string }> = [];
+        if (/\b(mlb|baseball)\b/i.test(lower)) {
+          leagues.push({
+            label: "MLB Baseball",
+            url: `https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates=${compactDateYYYYMMDD}`,
+            pageUrl: "https://www.espn.com/mlb/scoreboard",
+          });
+        } else if (/\b(ncaaf|college football|cfb)\b/i.test(lower)) {
+          leagues.push({
+            label: "NCAA College Football",
+            url: `https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard`,
+            pageUrl: "https://www.espn.com/college-football/scoreboard",
+          });
+        } else {
+          // Default to NFL + MLB for general "games today / schedule" on Sept 27, 2026
+          leagues.push({
+            label: "NFL Football",
+            url: `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard`,
+            pageUrl: "https://www.espn.com/nfl/scoreboard",
+          });
+          leagues.push({
+            label: "MLB Baseball",
+            url: `https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates=${compactDateYYYYMMDD}`,
+            pageUrl: "https://www.espn.com/mlb/scoreboard",
+          });
+        }
+
+        for (const league of leagues) {
+          try {
+            const res = await fetchWithTimeout(league.url);
+            if (!res.ok) continue;
+            const data: any = await res.json();
+            const events = Array.isArray(data?.events) ? data.events : [];
+            if (events.length === 0) continue;
+
+            const gameLines: string[] = [];
+            for (const ev of events.slice(0, 16)) {
+              const comp = ev.competitions?.[0];
+              const competitors = Array.isArray(comp?.competitors) ? comp.competitors : [];
+              const away = competitors.find((c: any) => c.homeAway === "away") || competitors[0];
+              const home = competitors.find((c: any) => c.homeAway === "home") || competitors[1];
+              const awayName = away?.team?.displayName || away?.team?.name || "";
+              const homeName = home?.team?.displayName || home?.team?.name || "";
+              const awayRecord = away?.records?.[0]?.summary ? ` (${away.records[0].summary})` : "";
+              const homeRecord = home?.records?.[0]?.summary ? ` (${home.records[0].summary})` : "";
+              const statusDetail = ev.status?.type?.detail || ev.status?.type?.shortDetail || "";
+              const broadcast =
+                comp?.broadcasts?.[0]?.names?.join(", ") || comp?.geoBroadcasts?.[0]?.media?.shortName || "";
+
+              // Convert UTC date to Pacific Time (PST/PDT)
+              let pstTimeStr = statusDetail;
+              if (ev.date) {
+                try {
+                  const d = new Date(ev.date);
+                  pstTimeStr = new Intl.DateTimeFormat("en-US", {
+                    timeZone: "America/Los_Angeles",
+                    weekday: "short",
+                    month: "short",
+                    day: "numeric",
+                    hour: "numeric",
+                    minute: "2-digit",
+                    timeZoneName: "short",
+                  }).format(d);
+                } catch {
+                  // fallback
+                }
+              }
+
+              const scorePart =
+                ev.status?.type?.state === "in" || ev.status?.type?.state === "post"
+                  ? ` — Score: ${awayName} ${away?.score ?? 0}, ${homeName} ${home?.score ?? 0} (${statusDetail})`
+                  : "";
+
+              gameLines.push(
+                `- ${awayName}${awayRecord} at ${homeName}${homeRecord} | Time (Pacific): ${pstTimeStr}${
+                  broadcast ? ` | TV: ${broadcast}` : ""
+                }${scorePart}`
+              );
+            }
+
+            if (gameLines.length > 0) {
+              sections.push(
+                `### LIVE ${league.label.toUpperCase()} SCHEDULE & SCOREBOARD (ESPN Real-Time Feed):\n` +
+                  gameLines.join("\n")
+              );
+              sources.push({
+                title: `ESPN Live ${league.label} Scoreboard & Schedule`,
+                uri: league.pageUrl,
+              });
+            }
+          } catch {
+            // ignore individual league failure
+          }
+        }
+      })()
+    );
+  }
+
+  // 2. Live DuckDuckGo Web Search Snippets
+  tasks.push(
+    (async () => {
+      try {
+        const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(searchQuery)}`;
+        const res = await fetchWithTimeout(ddgUrl, {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+          },
+        });
+        if (!res.ok) return;
+        const html = await res.text();
+        const matches = [
+          ...html.matchAll(
+            /<a rel="nofollow" class="result__a" href="([^"]+)">([\s\S]*?)<\/a>[\s\S]*?<a class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g
+          ),
+        ].slice(0, 5);
+
+        if (matches.length > 0) {
+          const webLines: string[] = [];
+          for (const m of matches) {
+            const rawHref = m[1] || "";
+            const uddgMatch = rawHref.match(/uddg=([^&]+)/);
+            const cleanUrl = uddgMatch ? decodeURIComponent(uddgMatch[1]) : rawHref;
+            const title = decodeHtmlEntities(m[2] || "");
+            const snippet = decodeHtmlEntities(m[3] || "");
+            if (title && snippet) {
+              webLines.push(`- **${title}**: ${snippet} (Source: ${cleanUrl})`);
+              if (cleanUrl.startsWith("http")) {
+                sources.push({ title, uri: cleanUrl });
+              }
+            }
+          }
+          if (webLines.length > 0) {
+            sections.push(`### LIVE WEB SEARCH RESULTS:\n${webLines.join("\n")}`);
+          }
+        }
+      } catch {
+        // ignore timeout
+      }
+    })()
+  );
+
+  // 3. Live Google News RSS Feed
+  tasks.push(
+    (async () => {
+      try {
+        const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(
+          cleanQuery
+        )}&hl=en-US&gl=US&ceid=US:en`;
+        const res = await fetchWithTimeout(rssUrl);
+        if (!res.ok) return;
+        const xml = await res.text();
+        const items = [
+          ...xml.matchAll(
+            /<item>[\s\S]*?<title>([\s\S]*?)<\/title>[\s\S]*?<link>([\s\S]*?)<\/link>[\s\S]*?<pubDate>([\s\S]*?)<\/pubDate>[\s\S]*?<\/item>/g
+          ),
+        ].slice(0, 5);
+
+        if (items.length > 0) {
+          const newsLines: string[] = [];
+          for (const item of items) {
+            const title = decodeHtmlEntities(item[1] || "");
+            const link = (item[2] || "").trim();
+            const pubDate = decodeHtmlEntities(item[3] || "");
+            if (title) {
+              newsLines.push(`- ${title} (Published: ${pubDate})`);
+              if (link.startsWith("http") && sources.length < 6) {
+                sources.push({ title, uri: link });
+              }
+            }
+          }
+          if (newsLines.length > 0) {
+            sections.push(`### LIVE GOOGLE NEWS HEADLINES:\n${newsLines.join("\n")}`);
+          }
+        }
+      } catch {
+        // ignore timeout
+      }
+    })()
+  );
+
+  await Promise.allSettled(tasks);
+
+  // Deduplicate sources by URI
+  const uniqueSources: Array<{ title: string; uri: string }> = [];
+  const seen = new Set<string>();
+  for (const s of sources) {
+    if (!seen.has(s.uri)) {
+      seen.add(s.uri);
+      uniqueSources.push(s);
+    }
+  }
+
+  return {
+    contextBlock: sections.join("\n\n"),
+    sources: uniqueSources.slice(0, 6),
+  };
+}
+
 function extractGroundingSources(chunkOrResponse: any): Array<{ title: string; uri: string }> {
   const sources: Array<{ title: string; uri: string }> = [];
   const chunks = chunkOrResponse?.candidates?.[0]?.groundingMetadata?.groundingChunks;
@@ -137,47 +435,23 @@ function extractGroundingSources(chunkOrResponse: any): Array<{ title: string; u
 async function generateStreamWithFallback(
   ai: GoogleGenAI,
   contents: any[],
-  systemInstruction: string,
-  useWebSearch = false
+  systemInstruction: string
 ) {
   let lastError: any = null;
-  let trySearch = useWebSearch;
 
   for (const model of MODELS_FALLBACK) {
     try {
-      const config: any = {
-        systemInstruction,
-        temperature: 0.7,
-      };
-      if (trySearch) {
-        config.tools = [{ googleSearch: {} }];
-      }
       const responseStream = await ai.models.generateContentStream({
         model,
         contents,
-        config,
+        config: {
+          systemInstruction,
+          temperature: 0.7,
+        },
       });
       return { stream: responseStream, model };
     } catch (err: any) {
-      // If Google Search tool failed (e.g. 429 search quota), disable search and immediately retry this model without tools
-      if (trySearch) {
-        trySearch = false;
-        try {
-          const responseStream = await ai.models.generateContentStream({
-            model,
-            contents,
-            config: {
-              systemInstruction,
-              temperature: 0.7,
-            },
-          });
-          return { stream: responseStream, model };
-        } catch (innerErr: any) {
-          lastError = innerErr;
-        }
-      } else {
-        lastError = err;
-      }
+      lastError = err;
       console.warn(`Model ${model} stream failed, attempting next fallback...`, err?.message || err);
     }
   }
@@ -187,46 +461,23 @@ async function generateStreamWithFallback(
 async function generateContentWithFallback(
   ai: GoogleGenAI,
   contents: any[],
-  systemInstruction: string,
-  useWebSearch = false
+  systemInstruction: string
 ) {
   let lastError: any = null;
-  let trySearch = useWebSearch;
 
   for (const model of MODELS_FALLBACK) {
     try {
-      const config: any = {
-        systemInstruction,
-        temperature: 0.7,
-      };
-      if (trySearch) {
-        config.tools = [{ googleSearch: {} }];
-      }
       const response = await ai.models.generateContent({
         model,
         contents,
-        config,
+        config: {
+          systemInstruction,
+          temperature: 0.7,
+        },
       });
       return { response, model };
     } catch (err: any) {
-      if (trySearch) {
-        trySearch = false;
-        try {
-          const response = await ai.models.generateContent({
-            model,
-            contents,
-            config: {
-              systemInstruction,
-              temperature: 0.7,
-            },
-          });
-          return { response, model };
-        } catch (innerErr: any) {
-          lastError = innerErr;
-        }
-      } else {
-        lastError = err;
-      }
+      lastError = err;
       console.warn(`Model ${model} failed, attempting next fallback...`, err?.message || err);
     }
   }
@@ -301,8 +552,9 @@ function assembleSystemInstruction(options: {
   customEt?: any;
   memoryItems?: any[];
   isVoiceMode?: boolean;
+  liveDateTimePST: string;
 }): string {
-  let instruction = ERIC_AI_SYSTEM_INSTRUCTION;
+  let instruction = `${ERIC_AI_SYSTEM_INSTRUCTION}\n\n[LIVE SYSTEM CLOCK: Today is ${options.liveDateTimePST}. All references to "today", "tonight", "this week", "current year", or "now" refer to ${options.liveDateTimePST}.]`;
 
   if (options.customEt) {
     instruction += `\n\n==================================================\n`;
@@ -352,9 +604,11 @@ function assembleSystemInstruction(options: {
 
 // API Routes
 app.get("/api/health", (req, res) => {
+  const { fullDateTimePST } = getFormattedPacificNow();
   res.json({
     status: "ok",
     hasApiKey: Boolean(process.env.GEMINI_API_KEY),
+    currentTimePST: fullDateTimePST,
     timestamp: new Date().toISOString(),
   });
 });
@@ -526,8 +780,9 @@ app.post("/api/chat/stream", async (req, res) => {
     attachments,
     customEt,
     memoryItems,
-    useWebSearch = false,
+    useWebSearch = true,
     isVoiceMode = false,
+    clientLocalTime,
   } = req.body;
 
   if (
@@ -556,6 +811,7 @@ app.post("/api/chat/stream", async (req, res) => {
 
   try {
     const ai = getGeminiClient();
+    const { fullDateTimePST, compactDateYYYYMMDD } = getFormattedPacificNow(clientLocalTime);
 
     const rawContents: Array<{
       role: "user" | "model";
@@ -582,7 +838,33 @@ app.post("/api/chat/stream", async (req, res) => {
       }
     }
 
-    const currentParts = buildUserParts(currentPrompt, attachments);
+    const collectedSources = new Map<string, { title: string; uri: string }>();
+    let enrichedPrompt = currentPrompt || "";
+
+    // Fetch live web & sports schedule context when web search is enabled or temporal/current keywords are detected
+    const needsLiveContext =
+      Boolean(useWebSearch) ||
+      /\b(today|tonight|yesterday|tomorrow|schedule|game|games|score|scores|nfl|mlb|nba|ncaaf|football|baseball|news|current|latest|2025|2026|weather|price|rate|rates|stock)\b/i.test(
+        enrichedPrompt
+      );
+
+    if (needsLiveContext && enrichedPrompt) {
+      const liveData = await fetchLiveWebAndSportsContext(enrichedPrompt, compactDateYYYYMMDD);
+      for (const s of liveData.sources) {
+        if (!collectedSources.has(s.uri)) {
+          collectedSources.set(s.uri, s);
+        }
+      }
+      if (liveData.contextBlock) {
+        enrichedPrompt = `[LIVE REAL-TIME SYSTEM CLOCK: ${fullDateTimePST}]\n[VERIFIED LIVE WEB & SPORTS DATA RETRIEVED FOR THIS QUERY]:\n${liveData.contextBlock}\n\n[ERIC'S MESSAGE]:\n${currentPrompt}`;
+      } else {
+        enrichedPrompt = `[LIVE REAL-TIME SYSTEM CLOCK: ${fullDateTimePST}]\n\n${currentPrompt}`;
+      }
+    } else if (enrichedPrompt) {
+      enrichedPrompt = `[LIVE REAL-TIME SYSTEM CLOCK: ${fullDateTimePST}]\n\n${currentPrompt}`;
+    }
+
+    const currentParts = buildUserParts(enrichedPrompt, attachments);
     if (currentParts.length > 0) {
       rawContents.push({
         role: "user",
@@ -597,16 +879,14 @@ app.post("/api/chat/stream", async (req, res) => {
       customEt,
       memoryItems,
       isVoiceMode,
+      liveDateTimePST: fullDateTimePST,
     });
 
     const { stream: responseStream } = await generateStreamWithFallback(
       ai,
       formattedContents,
-      systemInstruction,
-      Boolean(useWebSearch)
+      systemInstruction
     );
-
-    const collectedSources = new Map<string, { title: string; uri: string }>();
 
     for await (const chunk of responseStream) {
       const chunkText = chunk.text;
@@ -652,8 +932,9 @@ app.post("/api/chat", async (req, res) => {
     attachments,
     customEt,
     memoryItems,
-    useWebSearch = false,
+    useWebSearch = true,
     isVoiceMode = false,
+    clientLocalTime,
   } = req.body;
 
   try {
@@ -665,6 +946,7 @@ app.post("/api/chat", async (req, res) => {
     }
 
     const ai = getGeminiClient();
+    const { fullDateTimePST, compactDateYYYYMMDD } = getFormattedPacificNow(clientLocalTime);
 
     const rawContents: Array<{
       role: "user" | "model";
@@ -691,7 +973,26 @@ app.post("/api/chat", async (req, res) => {
       }
     }
 
-    const currentParts = buildUserParts(currentPrompt, attachments);
+    const collectedSources = new Map<string, { title: string; uri: string }>();
+    let enrichedPrompt = currentPrompt || "";
+
+    if (Boolean(useWebSearch) && enrichedPrompt) {
+      const liveData = await fetchLiveWebAndSportsContext(enrichedPrompt, compactDateYYYYMMDD);
+      for (const s of liveData.sources) {
+        if (!collectedSources.has(s.uri)) {
+          collectedSources.set(s.uri, s);
+        }
+      }
+      if (liveData.contextBlock) {
+        enrichedPrompt = `[LIVE REAL-TIME SYSTEM CLOCK: ${fullDateTimePST}]\n[VERIFIED LIVE WEB & SPORTS DATA RETRIEVED FOR THIS QUERY]:\n${liveData.contextBlock}\n\n[ERIC'S MESSAGE]:\n${currentPrompt}`;
+      } else {
+        enrichedPrompt = `[LIVE REAL-TIME SYSTEM CLOCK: ${fullDateTimePST}]\n\n${currentPrompt}`;
+      }
+    } else if (enrichedPrompt) {
+      enrichedPrompt = `[LIVE REAL-TIME SYSTEM CLOCK: ${fullDateTimePST}]\n\n${currentPrompt}`;
+    }
+
+    const currentParts = buildUserParts(enrichedPrompt, attachments);
     if (currentParts.length > 0) {
       rawContents.push({
         role: "user",
@@ -706,16 +1007,22 @@ app.post("/api/chat", async (req, res) => {
       customEt,
       memoryItems,
       isVoiceMode,
+      liveDateTimePST: fullDateTimePST,
     });
 
     const { response } = await generateContentWithFallback(
       ai,
       formattedContents,
-      systemInstruction,
-      Boolean(useWebSearch)
+      systemInstruction
     );
 
-    const sources = extractGroundingSources(response);
+    for (const s of extractGroundingSources(response)) {
+      if (!collectedSources.has(s.uri)) {
+        collectedSources.set(s.uri, s);
+      }
+    }
+
+    const sources = Array.from(collectedSources.values());
 
     res.json({
       text: response.text,

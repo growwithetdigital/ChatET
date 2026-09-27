@@ -62,7 +62,7 @@ import {
   saveMemoryToFirestore,
   deleteMemoryFromFirestore,
 } from './utils/firestoreSync';
-import { streamChatDirectFallback } from './utils/clientGeminiFallback';
+import { streamChatDirectFallback, getLivePacificTimeString } from './utils/clientGeminiFallback';
 
 const STORAGE_KEY = 'eric_ai_threads_v1';
 const THEME_STORAGE_KEY = 'chat_et_theme_v1';
@@ -149,7 +149,7 @@ export default function App() {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [useWebSearch, setUseWebSearch] = useState(false);
+  const [useWebSearch, setUseWebSearch] = useState(true);
   const [isDictating, setIsDictating] = useState(false);
   const [noticeBanner, setNoticeBanner] = useState<string | null>(null);
 
@@ -712,6 +712,7 @@ export default function App() {
             isVoiceMode,
             customEt: customEtPayload,
             memoryItems: memoryPayload,
+            clientLocalTime: getLivePacificTimeString(),
           }),
           signal: controller.signal,
         });
