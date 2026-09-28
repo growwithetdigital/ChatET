@@ -67,9 +67,9 @@ const ERIC_AI_SYSTEM_INSTRUCTION = `You are "ChatET" — a private, personal adv
 You are not a general-purpose product; you exist to be the sharpest, most honest thinking partner Eric has access to, across every part of his life.
 
 ## 0. LIVE REAL-TIME CLOCK & TEMPORAL ANCHOR (NON-NEGOTIABLE)
-- We are currently in **late September 2026** (specifically **Sunday, September 27, 2026**, Pacific Time).
-- **CRITICAL OVERRIDE:** NEVER state or imply that "as of today, we are in late 2024" or "2025", and NEVER claim that 2026 is in the future or that 2026 schedules/data do not exist yet. Your pre-training cutoff was earlier, so you MUST anchor all temporal reasoning to the live date injected below and the verified real-time web/schedule data provided in the prompt context.
-- Treat 2024 and 2025 as the past, and **September 27, 2026** as TODAY.
+- We are currently in **late September 2026** (Pacific Time).
+- **CRITICAL OVERRIDE:** NEVER state or imply that "as of today, we are in late 2024" or "2025", and NEVER claim that 2026 is in the future or that 2026 schedules/data do not exist yet. Your pre-training cutoff was earlier, so you MUST anchor all temporal reasoning to the live date injected in [LIVE SYSTEM CLOCK] below and the verified real-time web/schedule data provided in the prompt context.
+- Treat 2024 and 2025 as the past, and the live September 2026 timestamp below as TODAY.
 
 ## 1. CLEAR PERSONA & TONE
 - You are a witty, energetic, incisive, and deeply knowledgeable executive thinking partner. Keep your responses engaging, clear, and direct.
@@ -169,11 +169,15 @@ Whenever Eric runs any of his **Budderfly Collection** or Etsy POD prompts, exec
 This is a personal tool, not a diagnostic one: don't offer legal, medical, tax, or financial advice as if it were a professional recommendation — give Eric the factual landscape and flag when he should check with someone licensed. Treat every conversation as private and don't reference other "users" — there aren't any.`;
 
 const MODELS_FALLBACK = [
-  "gemini-3.1-flash-lite",
-  "gemini-3-flash-preview",
-  "gemini-3.8-flash",
+  "gemini-3.1-flash-lite-preview",
   "gemini-flash-latest",
+  "gemini-flash-lite-latest",
+  "gemini-3.1-flash-lite",
+  "gemini-3.8-flash",
+  "gemini-3-flash-preview",
 ];
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function decodeHtmlEntities(str: string): string {
   return str
@@ -449,14 +453,18 @@ function extractGroundingSources(chunkOrResponse: any): Array<{ title: string; u
   return sources;
 }
 
-async function generateStreamWithFallback(
+async function streamWithFullFallback(
   ai: GoogleGenAI,
   contents: any[],
-  systemInstruction: string
-) {
+  systemInstruction: string,
+  onChunk: (textDelta: string, sourcesDelta: Array<{ title: string; uri: string }>) => void
+): Promise<void> {
   let lastError: any = null;
+  let emittedText = false;
 
-  for (const model of MODELS_FALLBACK) {
+  // Pass 1: Attempt streaming across all 6 fallback models (catching errors both at init and during first-chunk read)
+  for (let i = 0; i < MODELS_FALLBACK.length; i++) {
+    const model = MODELS_FALLBACK[i];
     try {
       const responseStream = await ai.models.generateContentStream({
         model,
@@ -466,13 +474,46 @@ async function generateStreamWithFallback(
           temperature: 0.7,
         },
       });
-      return { stream: responseStream, model };
+
+      for await (const chunk of responseStream) {
+        const chunkText = chunk.text || "";
+        const chunkSources = extractGroundingSources(chunk);
+        if (chunkText) {
+          emittedText = true;
+        }
+        if (chunkText || chunkSources.length > 0) {
+          onChunk(chunkText, chunkSources);
+        }
+      }
+
+      if (emittedText) {
+        return;
+      }
     } catch (err: any) {
       lastError = err;
-      console.warn(`Model ${model} stream failed, attempting next fallback...`, err?.message || err);
+      console.warn(
+        `Model ${model} stream failed (emitted=${emittedText}), trying next fallback...`,
+        err?.message || err
+      );
+      if (emittedText) {
+        // Partial stream already sent to user; finish gracefully instead of failing
+        return;
+      }
+      await sleep(250);
     }
   }
-  throw lastError;
+
+  // Pass 2: If all streaming endpoints hit 503 high demand, retry using non-streaming generateContent across all models
+  await sleep(400);
+  const { response } = await generateContentWithFallback(ai, contents, systemInstruction);
+  const fullText = response.text || "";
+  const sources = extractGroundingSources(response);
+  if (fullText || sources.length > 0) {
+    onChunk(fullText, sources);
+    return;
+  }
+
+  throw lastError || new Error("All Gemini models are temporarily unavailable.");
 }
 
 async function generateContentWithFallback(
@@ -482,20 +523,28 @@ async function generateContentWithFallback(
 ) {
   let lastError: any = null;
 
-  for (const model of MODELS_FALLBACK) {
-    try {
-      const response = await ai.models.generateContent({
-        model,
-        contents,
-        config: {
-          systemInstruction,
-          temperature: 0.7,
-        },
-      });
-      return { response, model };
-    } catch (err: any) {
-      lastError = err;
-      console.warn(`Model ${model} failed, attempting next fallback...`, err?.message || err);
+  for (let pass = 0; pass < 2; pass++) {
+    for (const model of MODELS_FALLBACK) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents,
+          config: {
+            systemInstruction,
+            temperature: 0.7,
+          },
+        });
+        if (response?.text) {
+          return { response, model };
+        }
+      } catch (err: any) {
+        lastError = err;
+        console.warn(
+          `Model ${model} generateContent failed (pass ${pass + 1}), attempting next fallback...`,
+          err?.message || err
+        );
+        await sleep(250 * (pass + 1));
+      }
     }
   }
   throw lastError;
@@ -899,31 +948,28 @@ app.post("/api/chat/stream", async (req, res) => {
       liveDateTimePST: fullDateTimePST,
     });
 
-    const { stream: responseStream } = await generateStreamWithFallback(
+    await streamWithFullFallback(
       ai,
       formattedContents,
-      systemInstruction
-    );
+      systemInstruction,
+      (chunkText, chunkSources) => {
+        for (const s of chunkSources) {
+          if (!collectedSources.has(s.uri)) {
+            collectedSources.set(s.uri, s);
+          }
+        }
 
-    for await (const chunk of responseStream) {
-      const chunkText = chunk.text;
-      const chunkSources = extractGroundingSources(chunk);
-      for (const s of chunkSources) {
-        if (!collectedSources.has(s.uri)) {
-          collectedSources.set(s.uri, s);
+        if (chunkText || chunkSources.length > 0) {
+          res.write(
+            `data: ${JSON.stringify({
+              text: chunkText || "",
+              sources: collectedSources.size > 0 ? Array.from(collectedSources.values()) : undefined,
+              done: false,
+            })}\n\n`
+          );
         }
       }
-
-      if (chunkText || chunkSources.length > 0) {
-        res.write(
-          `data: ${JSON.stringify({
-            text: chunkText || "",
-            sources: collectedSources.size > 0 ? Array.from(collectedSources.values()) : undefined,
-            done: false,
-          })}\n\n`
-        );
-      }
-    }
+    );
 
     res.write(
       `data: ${JSON.stringify({

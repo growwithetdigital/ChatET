@@ -23,9 +23,9 @@ const CHATET_SYSTEM_INSTRUCTION = `You are "ChatET" — a private, personal advi
 You are not a general-purpose product; you exist to be the sharpest, most honest thinking partner Eric has access to, across every part of his life.
 
 ## 0. LIVE REAL-TIME CLOCK & TEMPORAL ANCHOR (NON-NEGOTIABLE)
-- We are currently in **late September 2026** (specifically **Sunday, September 27, 2026**, Pacific Time).
-- **CRITICAL OVERRIDE:** NEVER state or imply that "as of today, we are in late 2024" or "2025", and NEVER claim that 2026 is in the future or that 2026 schedules/data do not exist yet. Your pre-training cutoff was earlier, so you MUST anchor all temporal reasoning to the live date injected below.
-- Treat 2024 and 2025 as the past, and **September 27, 2026** as TODAY.
+- We are currently in **late September 2026** (Pacific Time).
+- **CRITICAL OVERRIDE:** NEVER state or imply that "as of today, we are in late 2024" or "2025", and NEVER claim that 2026 is in the future or that 2026 schedules/data do not exist yet. Your pre-training cutoff was earlier, so you MUST anchor all temporal reasoning to the live date injected in [LIVE SYSTEM CLOCK] below.
+- Treat 2024 and 2025 as the past, and the live September 2026 timestamp below as TODAY.
 
 ## 1. CLEAR PERSONA & TONE
 - You are a witty, energetic, incisive, and deeply knowledgeable executive thinking partner. Keep your responses engaging, clear, and direct.
@@ -125,11 +125,15 @@ Whenever Eric runs any of his **Budderfly Collection** or Etsy POD prompts, exec
 This is a personal tool, not a diagnostic one: don't offer legal, medical, tax, or financial advice as if it were a professional recommendation — give Eric the factual landscape and flag when he should check with someone licensed. Treat every conversation as private and don't reference other "users" — there aren't any.`;
 
 const FALLBACK_MODELS = [
-  'gemini-3.1-flash-lite',
-  'gemini-3-flash-preview',
-  'gemini-3.8-flash',
+  'gemini-3.1-flash-lite-preview',
   'gemini-flash-latest',
+  'gemini-flash-lite-latest',
+  'gemini-3.1-flash-lite',
+  'gemini-3.8-flash',
+  'gemini-3-flash-preview',
 ];
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function buildUserParts(currentPrompt?: string, attachments?: FileAttachment[]): any[] {
   const parts: any[] = [];
@@ -317,12 +321,14 @@ export async function streamChatDirectFallback(params: {
     liveDateTimePST,
   });
 
-  let responseStream: any = null;
+  const collectedSources = new Map<string, GroundingSource>();
   let lastError: any = null;
+  let emittedText = false;
 
+  // Pass 1: Attempt streaming across all 6 fallback models (catching 503 both at init and during stream reading)
   for (const model of FALLBACK_MODELS) {
     try {
-      responseStream = await ai.models.generateContentStream({
+      const responseStream = await ai.models.generateContentStream({
         model,
         contents: formattedContents,
         config: {
@@ -330,30 +336,69 @@ export async function streamChatDirectFallback(params: {
           temperature: 0.7,
         },
       });
-      break;
+
+      for await (const chunk of responseStream) {
+        const chunkText = chunk.text || '';
+        const chunkSources = extractGroundingSources(chunk);
+        for (const s of chunkSources) {
+          if (!collectedSources.has(s.uri)) {
+            collectedSources.set(s.uri, s);
+          }
+        }
+        if (chunkText) {
+          emittedText = true;
+        }
+        const sourcesArray =
+          collectedSources.size > 0 ? Array.from(collectedSources.values()) : undefined;
+        if (chunkText || sourcesArray) {
+          params.onChunk(chunkText, sourcesArray);
+        }
+      }
+
+      if (emittedText) {
+        return;
+      }
     } catch (err: any) {
       lastError = err;
+      if (emittedText) {
+        return;
+      }
+      await sleep(250);
     }
   }
 
-  if (!responseStream) {
-    throw lastError || new Error('All fallback models failed.');
-  }
-
-  const collectedSources = new Map<string, GroundingSource>();
-
-  for await (const chunk of responseStream) {
-    const chunkText = chunk.text || '';
-    const chunkSources = extractGroundingSources(chunk);
-    for (const s of chunkSources) {
-      if (!collectedSources.has(s.uri)) {
-        collectedSources.set(s.uri, s);
+  // Pass 2: If streaming endpoints hit 503 high demand, retry with non-streaming generateContent across all 6 models
+  for (let pass = 0; pass < 2; pass++) {
+    await sleep(350 * (pass + 1));
+    for (const model of FALLBACK_MODELS) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: formattedContents,
+          config: {
+            systemInstruction,
+            temperature: 0.7,
+          },
+        });
+        const fullText = response.text || '';
+        const chunkSources = extractGroundingSources(response);
+        for (const s of chunkSources) {
+          if (!collectedSources.has(s.uri)) {
+            collectedSources.set(s.uri, s);
+          }
+        }
+        if (fullText) {
+          const sourcesArray =
+            collectedSources.size > 0 ? Array.from(collectedSources.values()) : undefined;
+          params.onChunk(fullText, sourcesArray);
+          return;
+        }
+      } catch (err: any) {
+        lastError = err;
+        await sleep(250);
       }
     }
-    const sourcesArray =
-      collectedSources.size > 0 ? Array.from(collectedSources.values()) : undefined;
-    if (chunkText || sourcesArray) {
-      params.onChunk(chunkText, sourcesArray);
-    }
   }
+
+  throw lastError || new Error('All fallback models are temporarily experiencing high demand.');
 }

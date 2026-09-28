@@ -757,22 +757,53 @@ export default function App() {
         if (serverErr?.name === 'AbortError') {
           throw serverErr;
         }
-        // If backend route returned 404 (e.g. static/shared preview) or stream error, fall back to direct client Gemini stream
+        // If backend stream failed or returned 503/404, try non-streaming /api/chat first, then direct client Gemini fallback
         if (!accumulatedText) {
-          usedDirectFallback = true;
-          await streamChatDirectFallback({
-            messages: messagesHistory,
-            currentPrompt: promptToSend,
-            focusArea: effectiveLens,
-            attachments: attachmentsToSend,
-            useWebSearch,
-            isVoiceMode,
-            customEt: customEtPayload,
-            memoryItems: memoryPayload,
-            onChunk: (textDelta, sourcesUpdate) => {
-              applyStreamUpdate(textDelta, sourcesUpdate);
-            },
-          });
+          let recoveredOnRest = false;
+          try {
+            const restRes = await fetch('/api/chat', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                messages: messagesHistory,
+                currentPrompt: promptToSend,
+                focusArea: effectiveLens,
+                attachments: attachmentsToSend,
+                useWebSearch,
+                isVoiceMode,
+                customEt: customEtPayload,
+                memoryItems: memoryPayload,
+                clientLocalTime: getLivePacificTimeString(),
+              }),
+              signal: controller.signal,
+            });
+            if (restRes.ok) {
+              const restData = await restRes.json();
+              if (restData?.text) {
+                applyStreamUpdate(restData.text, restData.sources);
+                recoveredOnRest = true;
+              }
+            }
+          } catch {
+            // proceed to direct client fallback
+          }
+
+          if (!recoveredOnRest && !accumulatedText) {
+            usedDirectFallback = true;
+            await streamChatDirectFallback({
+              messages: messagesHistory,
+              currentPrompt: promptToSend,
+              focusArea: effectiveLens,
+              attachments: attachmentsToSend,
+              useWebSearch,
+              isVoiceMode,
+              customEt: customEtPayload,
+              memoryItems: memoryPayload,
+              onChunk: (textDelta, sourcesUpdate) => {
+                applyStreamUpdate(textDelta, sourcesUpdate);
+              },
+            });
+          }
         } else {
           throw serverErr;
         }
